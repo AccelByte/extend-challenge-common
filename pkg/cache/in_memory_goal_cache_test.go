@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"extend-challenge-common/pkg/config"
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/config"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 func TestNewInMemoryGoalCache(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 // MockRewardClient is a mock implementation of RewardClient for testing.

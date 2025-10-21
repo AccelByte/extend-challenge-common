@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 // ProgressIncrement represents a single atomic increment operation for batch processing.

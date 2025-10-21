@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 func TestConfigLoader_LoadConfig(t *testing.T) {

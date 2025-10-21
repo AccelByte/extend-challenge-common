@@ -1,6 +1,6 @@
 package config
 
-import "extend-challenge-common/pkg/domain"
+import "github.com/AccelByte/extend-challenge-common/pkg/domain"
 
 // Config represents the top-level configuration loaded from challenges.json.
 // This structure is parsed from JSON and validated during application startup.

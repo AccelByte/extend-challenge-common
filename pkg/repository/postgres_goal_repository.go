@@ -3,8 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"extend-challenge-common/pkg/domain"
-	"extend-challenge-common/pkg/errors"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/errors"
 	"fmt"
 	"strings"
 	"time"

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 // Error types for AGS Platform Service errors

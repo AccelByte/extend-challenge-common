@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 // Validator validates challenge configuration files.

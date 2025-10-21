@@ -4,8 +4,8 @@ import (
 	"log/slog"
 	"sync"
 
-	"extend-challenge-common/pkg/config"
-	"extend-challenge-common/pkg/domain"
+	"github.com/AccelByte/extend-challenge-common/pkg/config"
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 // InMemoryGoalCache provides O(1) in-memory lookups for goal configurations.

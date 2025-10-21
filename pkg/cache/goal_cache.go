@@ -1,6 +1,6 @@
 package cache
 
-import "extend-challenge-common/pkg/domain"
+import "github.com/AccelByte/extend-challenge-common/pkg/domain"
 
 // GoalCache provides O(1) in-memory lookups for goal configurations.
 // This cache is built at application startup from the challenges.json config file.
