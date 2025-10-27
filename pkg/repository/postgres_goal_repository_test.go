@@ -4,11 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/AccelByte/extend-challenge-common/pkg/domain"
-	customerrors "github.com/AccelByte/extend-challenge-common/pkg/errors"
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
+	customerrors "github.com/AccelByte/extend-challenge-common/pkg/errors"
 
 	_ "github.com/lib/pq"
 )
@@ -337,6 +338,186 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 		err := repo.BatchUpsertProgress(ctx, []*domain.UserGoalProgress{})
 		if err != nil {
 			t.Fatalf("Empty BatchUpsertProgress should not error: %v", err)
+		}
+	})
+}
+
+func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
+	db := setupTestDB(t)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDB(t, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	t.Run("batch insert multiple progress records with COPY", func(t *testing.T) {
+		updates := []*domain.UserGoalProgress{
+			{
+				UserID:      "copy-user1",
+				GoalID:      "copy-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    5,
+				Status:      domain.GoalStatusInProgress,
+			},
+			{
+				UserID:      "copy-user1",
+				GoalID:      "copy-goal2",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusCompleted,
+			},
+			{
+				UserID:      "copy-user2",
+				GoalID:      "copy-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    3,
+				Status:      domain.GoalStatusInProgress,
+			},
+		}
+
+		err := repo.BatchUpsertProgressWithCOPY(ctx, updates)
+		if err != nil {
+			t.Fatalf("BatchUpsertProgressWithCOPY failed: %v", err)
+		}
+
+		// Verify all records were inserted
+		progress1, _ := repo.GetProgress(ctx, "copy-user1", "copy-goal1")
+		if progress1 == nil || progress1.Progress != 5 {
+			t.Error("copy-user1/copy-goal1 not inserted correctly")
+		}
+
+		progress2, _ := repo.GetProgress(ctx, "copy-user1", "copy-goal2")
+		if progress2 == nil || progress2.Progress != 10 {
+			t.Error("copy-user1/copy-goal2 not inserted correctly")
+		}
+
+		progress3, _ := repo.GetProgress(ctx, "copy-user2", "copy-goal1")
+		if progress3 == nil || progress3.Progress != 3 {
+			t.Error("copy-user2/copy-goal1 not inserted correctly")
+		}
+	})
+
+	t.Run("batch update existing records with COPY", func(t *testing.T) {
+		// Insert initial records using COPY
+		initial := []*domain.UserGoalProgress{
+			{
+				UserID:      "copy-user3",
+				GoalID:      "copy-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    1,
+				Status:      domain.GoalStatusInProgress,
+			},
+			{
+				UserID:      "copy-user3",
+				GoalID:      "copy-goal2",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    2,
+				Status:      domain.GoalStatusInProgress,
+			},
+		}
+		err := repo.BatchUpsertProgressWithCOPY(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial BatchUpsertProgressWithCOPY failed: %v", err)
+		}
+
+		// Update records using COPY
+		updates := []*domain.UserGoalProgress{
+			{
+				UserID:      "copy-user3",
+				GoalID:      "copy-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    5,
+				Status:      domain.GoalStatusInProgress,
+			},
+			{
+				UserID:      "copy-user3",
+				GoalID:      "copy-goal2",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusCompleted,
+			},
+		}
+		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
+		if err != nil {
+			t.Fatalf("Update BatchUpsertProgressWithCOPY failed: %v", err)
+		}
+
+		// Verify updates
+		progress1, _ := repo.GetProgress(ctx, "copy-user3", "copy-goal1")
+		if progress1.Progress != 5 {
+			t.Errorf("copy-user3/copy-goal1 progress = %d, want 5", progress1.Progress)
+		}
+
+		progress2, _ := repo.GetProgress(ctx, "copy-user3", "copy-goal2")
+		if progress2.Progress != 10 {
+			t.Errorf("copy-user3/copy-goal2 progress = %d, want 10", progress2.Progress)
+		}
+	})
+
+	t.Run("empty batch does nothing with COPY", func(t *testing.T) {
+		err := repo.BatchUpsertProgressWithCOPY(ctx, []*domain.UserGoalProgress{})
+		if err != nil {
+			t.Fatalf("Empty BatchUpsertProgressWithCOPY should not error: %v", err)
+		}
+	})
+
+	t.Run("does not update claimed goals with COPY", func(t *testing.T) {
+		// Insert a goal and mark it as claimed
+		completedAt := time.Now()
+		initial := []*domain.UserGoalProgress{
+			{
+				UserID:      "copy-user4",
+				GoalID:      "copy-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusCompleted,
+				CompletedAt: &completedAt,
+			},
+		}
+		err := repo.BatchUpsertProgressWithCOPY(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// Mark as claimed
+		err = repo.MarkAsClaimed(ctx, "copy-user4", "copy-goal1")
+		if err != nil {
+			t.Fatalf("MarkAsClaimed failed: %v", err)
+		}
+
+		// Try to update the claimed goal
+		updates := []*domain.UserGoalProgress{
+			{
+				UserID:      "copy-user4",
+				GoalID:      "copy-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    20, // Try to change progress
+				Status:      domain.GoalStatusInProgress,
+			},
+		}
+		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
+		if err != nil {
+			t.Fatalf("BatchUpsertProgressWithCOPY failed: %v", err)
+		}
+
+		// Verify the claimed goal was NOT updated
+		progress, _ := repo.GetProgress(ctx, "copy-user4", "copy-goal1")
+		if progress.Progress != 10 {
+			t.Errorf("Claimed goal was updated (progress = %d), should remain 10", progress.Progress)
+		}
+		if progress.Status != domain.GoalStatusClaimed {
+			t.Errorf("Goal status = %s, want claimed", progress.Status)
 		}
 	})
 }
