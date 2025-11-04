@@ -397,3 +397,168 @@ func createTempConfigFile(t *testing.T, content string) string {
 
 	return tmpFile
 }
+
+// M3: Test GetGoalsWithDefaultAssigned method
+func TestInMemoryGoalCache_GetGoalsWithDefaultAssigned(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	// Create config with mix of default_assigned goals
+	cfg := &config.Config{
+		Challenges: []*domain.Challenge{
+			{
+				ID:          "challenge-1",
+				Name:        "Challenge 1",
+				Description: "Description",
+				Goals: []*domain.Goal{
+					{
+						ID:              "goal-1-default",
+						Name:            "Default Goal 1",
+						Description:     "Assigned by default",
+						ChallengeID:     "challenge-1",
+						Type:            domain.GoalTypeAbsolute,
+						EventSource:     domain.EventSourceStatistic,
+						DefaultAssigned: true, // M3: Default assigned
+						Requirement: domain.Requirement{
+							StatCode:    "stat_code_1",
+							Operator:    ">=",
+							TargetValue: 10,
+						},
+						Reward: domain.Reward{
+							Type:     "ITEM",
+							RewardID: "item_1",
+							Quantity: 1,
+						},
+					},
+					{
+						ID:              "goal-2-manual",
+						Name:            "Manual Goal",
+						Description:     "Not assigned by default",
+						ChallengeID:     "challenge-1",
+						Type:            domain.GoalTypeAbsolute,
+						EventSource:     domain.EventSourceStatistic,
+						DefaultAssigned: false, // M3: Not default assigned
+						Requirement: domain.Requirement{
+							StatCode:    "stat_code_2",
+							Operator:    ">=",
+							TargetValue: 20,
+						},
+						Reward: domain.Reward{
+							Type:     "WALLET",
+							RewardID: "GOLD",
+							Quantity: 100,
+						},
+					},
+				},
+			},
+			{
+				ID:          "challenge-2",
+				Name:        "Challenge 2",
+				Description: "Description",
+				Goals: []*domain.Goal{
+					{
+						ID:              "goal-3-default",
+						Name:            "Default Goal 2",
+						Description:     "Also assigned by default",
+						ChallengeID:     "challenge-2",
+						Type:            domain.GoalTypeIncrement,
+						EventSource:     domain.EventSourceLogin,
+						DefaultAssigned: true, // M3: Default assigned
+						Requirement: domain.Requirement{
+							StatCode:    "login_count",
+							Operator:    ">=",
+							TargetValue: 7,
+						},
+						Reward: domain.Reward{
+							Type:     "ITEM",
+							RewardID: "item_3",
+							Quantity: 1,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cache := NewInMemoryGoalCache(cfg, "/path/to/config.json", logger)
+
+	t.Run("returns only default assigned goals", func(t *testing.T) {
+		defaultGoals := cache.GetGoalsWithDefaultAssigned()
+
+		// Should return only goals with DefaultAssigned = true
+		if len(defaultGoals) != 2 {
+			t.Fatalf("expected 2 default goals, got %d", len(defaultGoals))
+		}
+
+		// Verify the goals are the ones marked as default_assigned
+		foundGoal1 := false
+		foundGoal3 := false
+
+		for _, goal := range defaultGoals {
+			if !goal.DefaultAssigned {
+				t.Errorf("goal %s should have DefaultAssigned=true", goal.ID)
+			}
+
+			if goal.ID == "goal-1-default" {
+				foundGoal1 = true
+			}
+
+			if goal.ID == "goal-3-default" {
+				foundGoal3 = true
+			}
+
+			// Ensure manual goal is not included
+			if goal.ID == "goal-2-manual" {
+				t.Errorf("manual goal %s should not be in default goals list", goal.ID)
+			}
+		}
+
+		if !foundGoal1 {
+			t.Error("expected to find goal-1-default in default goals list")
+		}
+
+		if !foundGoal3 {
+			t.Error("expected to find goal-3-default in default goals list")
+		}
+	})
+
+	t.Run("returns empty slice when no default goals", func(t *testing.T) {
+		// Create config with no default assigned goals
+		cfgNoDefaults := &config.Config{
+			Challenges: []*domain.Challenge{
+				{
+					ID:          "challenge-1",
+					Name:        "Challenge 1",
+					Description: "Description",
+					Goals: []*domain.Goal{
+						{
+							ID:              "goal-1",
+							Name:            "Goal 1",
+							Description:     "Not default",
+							ChallengeID:     "challenge-1",
+							Type:            domain.GoalTypeAbsolute,
+							EventSource:     domain.EventSourceStatistic,
+							DefaultAssigned: false,
+							Requirement: domain.Requirement{
+								StatCode:    "stat_code_1",
+								Operator:    ">=",
+								TargetValue: 10,
+							},
+							Reward: domain.Reward{
+								Type:     "ITEM",
+								RewardID: "item_1",
+								Quantity: 1,
+							},
+						},
+					},
+				},
+			},
+		}
+
+		cacheNoDefaults := NewInMemoryGoalCache(cfgNoDefaults, "/path/to/config.json", logger)
+		defaultGoals := cacheNoDefaults.GetGoalsWithDefaultAssigned()
+
+		if len(defaultGoals) != 0 {
+			t.Errorf("expected 0 default goals, got %d", len(defaultGoals))
+		}
+	})
+}

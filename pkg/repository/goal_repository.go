@@ -113,6 +113,24 @@ type GoalRepository interface {
 	// BeginTx starts a database transaction and returns a transactional repository.
 	// Used for claim flow to ensure atomicity (check status + mark claimed + verify).
 	BeginTx(ctx context.Context) (TxRepository, error)
+
+	// M3: Goal assignment control methods
+
+	// GetGoalsByIDs retrieves goal progress records for a user across multiple goal IDs.
+	// Returns empty slice if none of the goals have progress records.
+	// Used by initialization endpoint to check which default goals already exist.
+	GetGoalsByIDs(ctx context.Context, userID string, goalIDs []string) ([]*domain.UserGoalProgress, error)
+
+	// BulkInsert creates multiple goal progress records in a single query.
+	// Uses INSERT ... ON CONFLICT DO NOTHING for idempotency.
+	// Used by initialization endpoint to create default goal assignments.
+	BulkInsert(ctx context.Context, progresses []*domain.UserGoalProgress) error
+
+	// UpsertGoalActive creates or updates a goal's is_active status.
+	// If row doesn't exist, creates it with is_active and assigned_at fields.
+	// If row exists, updates is_active and assigned_at (only when activating).
+	// Used by manual activation/deactivation endpoint.
+	UpsertGoalActive(ctx context.Context, progress *domain.UserGoalProgress) error
 }
 
 // TxRepository represents a transactional repository that supports commit/rollback.

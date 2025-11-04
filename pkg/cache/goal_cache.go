@@ -33,6 +33,12 @@ type GoalCache interface {
 	// Time complexity: O(n) where n is total number of goals
 	GetAllGoals() []*domain.Goal
 
+	// M3: GetGoalsWithDefaultAssigned retrieves all goals that have default_assigned = true.
+	// Used by initialization endpoint to determine which goals to assign to new players.
+	// Returns empty slice if no goals are marked as default assigned.
+	// Time complexity: O(n) where n is total number of goals
+	GetGoalsWithDefaultAssigned() []*domain.Goal
+
 	// Reload reloads the cache from the config file.
 	// In M1, this requires application restart (config is baked into Docker image).
 	// Returns error if config file cannot be read or is invalid.

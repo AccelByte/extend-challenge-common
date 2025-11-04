@@ -148,6 +148,25 @@ func (c *InMemoryGoalCache) GetAllGoals() []*domain.Goal {
 	return allGoals
 }
 
+// GetGoalsWithDefaultAssigned retrieves all goals that have default_assigned = true.
+// Used by initialization endpoint to determine which goals to assign to new players.
+// Returns empty slice if no goals are marked as default assigned.
+// Time complexity: O(n) where n is total number of goals
+func (c *InMemoryGoalCache) GetGoalsWithDefaultAssigned() []*domain.Goal {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	// Filter goals by DefaultAssigned flag
+	defaultGoals := make([]*domain.Goal, 0)
+	for _, goal := range c.goalsByID {
+		if goal.DefaultAssigned {
+			defaultGoals = append(defaultGoals, goal)
+		}
+	}
+
+	return defaultGoals
+}
+
 // Reload reloads the cache from the config file.
 // In M1, this requires application restart (config is baked into Docker image).
 // This method is provided for future use when hot-reload is supported.

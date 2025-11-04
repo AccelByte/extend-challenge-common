@@ -29,7 +29,8 @@ func NewPostgresGoalRepository(db *sql.DB) *PostgresGoalRepository {
 func (r *PostgresGoalRepository) GetProgress(ctx context.Context, userID, goalID string) (*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = $2
 	`
@@ -46,6 +47,9 @@ func (r *PostgresGoalRepository) GetProgress(ctx context.Context, userID, goalID
 		&progress.ClaimedAt,
 		&progress.CreatedAt,
 		&progress.UpdatedAt,
+		&progress.IsActive,
+		&progress.AssignedAt,
+		&progress.ExpiresAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -63,7 +67,8 @@ func (r *PostgresGoalRepository) GetProgress(ctx context.Context, userID, goalID
 func (r *PostgresGoalRepository) GetUserProgress(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1
 		ORDER BY created_at ASC
@@ -82,7 +87,8 @@ func (r *PostgresGoalRepository) GetUserProgress(ctx context.Context, userID str
 func (r *PostgresGoalRepository) GetChallengeProgress(ctx context.Context, userID, challengeID string) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND challenge_id = $2
 		ORDER BY created_at ASC
@@ -570,6 +576,119 @@ func (r *PostgresGoalRepository) MarkAsClaimed(ctx context.Context, userID, goal
 	return nil
 }
 
+// M3: Goal assignment control methods
+
+// GetGoalsByIDs retrieves goal progress records for a user across multiple goal IDs.
+func (r *PostgresGoalRepository) GetGoalsByIDs(ctx context.Context, userID string, goalIDs []string) ([]*domain.UserGoalProgress, error) {
+	if len(goalIDs) == 0 {
+		return []*domain.UserGoalProgress{}, nil
+	}
+
+	query := `
+		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
+		FROM user_goal_progress
+		WHERE user_id = $1 AND goal_id = ANY($2)
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, userID, pq.Array(goalIDs))
+	if err != nil {
+		return nil, errors.ErrDatabaseError("get goals by IDs", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.scanProgressRows(rows)
+}
+
+// BulkInsert creates multiple goal progress records in a single query.
+func (r *PostgresGoalRepository) BulkInsert(ctx context.Context, progresses []*domain.UserGoalProgress) error {
+	if len(progresses) == 0 {
+		return nil
+	}
+
+	// Build values for bulk insert
+	valueStrings := make([]string, 0, len(progresses))
+	valueArgs := make([]interface{}, 0, len(progresses)*13)
+
+	for i, p := range progresses {
+		valueStrings = append(valueStrings, fmt.Sprintf(
+			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d)",
+			i*13+1, i*13+2, i*13+3, i*13+4, i*13+5, i*13+6, i*13+7, i*13+8, i*13+9, i*13+10, i*13+11,
+		))
+
+		valueArgs = append(valueArgs,
+			p.UserID,
+			p.GoalID,
+			p.ChallengeID,
+			p.Namespace,
+			p.Progress,
+			p.Status,
+			p.CompletedAt,
+			p.ClaimedAt,
+			p.IsActive,
+			p.AssignedAt,
+			p.ExpiresAt,
+		)
+	}
+
+	//nolint:gosec // Safe: valueStrings contains only parameterized placeholders like "($1, $2, $3)", not user input
+	query := fmt.Sprintf(`
+		INSERT INTO user_goal_progress (
+			user_id, goal_id, challenge_id, namespace,
+			progress, status, completed_at, claimed_at,
+			created_at, updated_at,
+			is_active, assigned_at, expires_at
+		) VALUES %s
+		ON CONFLICT (user_id, goal_id) DO NOTHING
+	`, strings.Join(valueStrings, ","))
+
+	_, err := r.db.ExecContext(ctx, query, valueArgs...)
+	if err != nil {
+		return errors.ErrDatabaseError("bulk insert goals", err)
+	}
+
+	return nil
+}
+
+// UpsertGoalActive creates or updates a goal's is_active status.
+func (r *PostgresGoalRepository) UpsertGoalActive(ctx context.Context, progress *domain.UserGoalProgress) error {
+	query := `
+		INSERT INTO user_goal_progress (
+			user_id, goal_id, challenge_id, namespace,
+			progress, status, is_active, assigned_at,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()
+		)
+		ON CONFLICT (user_id, goal_id) DO UPDATE SET
+			is_active = EXCLUDED.is_active,
+			assigned_at = CASE
+				WHEN EXCLUDED.is_active = true THEN NOW()
+				ELSE user_goal_progress.assigned_at
+			END,
+			updated_at = NOW()
+	`
+
+	_, err := r.db.ExecContext(ctx, query,
+		progress.UserID,
+		progress.GoalID,
+		progress.ChallengeID,
+		progress.Namespace,
+		progress.Progress,
+		progress.Status,
+		progress.IsActive,
+		progress.AssignedAt,
+	)
+
+	if err != nil {
+		return errors.ErrDatabaseError("upsert goal active", err)
+	}
+
+	return nil
+}
+
 // BeginTx starts a database transaction and returns a transactional repository.
 func (r *PostgresGoalRepository) BeginTx(ctx context.Context) (TxRepository, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -600,6 +719,9 @@ func (r *PostgresGoalRepository) scanProgressRows(rows *sql.Rows) ([]*domain.Use
 			&progress.ClaimedAt,
 			&progress.CreatedAt,
 			&progress.UpdatedAt,
+			&progress.IsActive,
+			&progress.AssignedAt,
+			&progress.ExpiresAt,
 		)
 		if err != nil {
 			return nil, errors.ErrDatabaseError("scan progress row", err)
@@ -624,7 +746,8 @@ type PostgresTxRepository struct {
 func (r *PostgresTxRepository) GetProgress(ctx context.Context, userID, goalID string) (*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = $2
 	`
@@ -641,6 +764,9 @@ func (r *PostgresTxRepository) GetProgress(ctx context.Context, userID, goalID s
 		&progress.ClaimedAt,
 		&progress.CreatedAt,
 		&progress.UpdatedAt,
+		&progress.IsActive,
+		&progress.AssignedAt,
+		&progress.ExpiresAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -658,7 +784,8 @@ func (r *PostgresTxRepository) GetProgress(ctx context.Context, userID, goalID s
 func (r *PostgresTxRepository) GetProgressForUpdate(ctx context.Context, userID, goalID string) (*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = $2
 		FOR UPDATE
@@ -676,6 +803,9 @@ func (r *PostgresTxRepository) GetProgressForUpdate(ctx context.Context, userID,
 		&progress.ClaimedAt,
 		&progress.CreatedAt,
 		&progress.UpdatedAt,
+		&progress.IsActive,
+		&progress.AssignedAt,
+		&progress.ExpiresAt,
 	)
 
 	if err == sql.ErrNoRows {
@@ -693,7 +823,8 @@ func (r *PostgresTxRepository) GetProgressForUpdate(ctx context.Context, userID,
 func (r *PostgresTxRepository) GetUserProgress(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1
 		ORDER BY created_at ASC
@@ -712,7 +843,8 @@ func (r *PostgresTxRepository) GetUserProgress(ctx context.Context, userID strin
 func (r *PostgresTxRepository) GetChallengeProgress(ctx context.Context, userID, challengeID string) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       completed_at, claimed_at, created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND challenge_id = $2
 		ORDER BY created_at ASC
@@ -1149,6 +1281,119 @@ func (r *PostgresTxRepository) MarkAsClaimed(ctx context.Context, userID, goalID
 
 	if rowsAffected == 0 {
 		return errors.ErrGoalNotCompleted(goalID)
+	}
+
+	return nil
+}
+
+// M3: Goal assignment control methods
+
+// GetGoalsByIDs retrieves goal progress records within a transaction.
+func (r *PostgresTxRepository) GetGoalsByIDs(ctx context.Context, userID string, goalIDs []string) ([]*domain.UserGoalProgress, error) {
+	if len(goalIDs) == 0 {
+		return []*domain.UserGoalProgress{}, nil
+	}
+
+	query := `
+		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
+		FROM user_goal_progress
+		WHERE user_id = $1 AND goal_id = ANY($2)
+		ORDER BY created_at ASC
+	`
+
+	rows, err := r.tx.QueryContext(ctx, query, userID, pq.Array(goalIDs))
+	if err != nil {
+		return nil, errors.ErrDatabaseError("get goals by IDs in transaction", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	return r.parent.scanProgressRows(rows)
+}
+
+// BulkInsert creates multiple goal progress records within a transaction.
+func (r *PostgresTxRepository) BulkInsert(ctx context.Context, progresses []*domain.UserGoalProgress) error {
+	if len(progresses) == 0 {
+		return nil
+	}
+
+	// Build values for bulk insert
+	valueStrings := make([]string, 0, len(progresses))
+	valueArgs := make([]interface{}, 0, len(progresses)*13)
+
+	for i, p := range progresses {
+		valueStrings = append(valueStrings, fmt.Sprintf(
+			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d)",
+			i*13+1, i*13+2, i*13+3, i*13+4, i*13+5, i*13+6, i*13+7, i*13+8, i*13+9, i*13+10, i*13+11,
+		))
+
+		valueArgs = append(valueArgs,
+			p.UserID,
+			p.GoalID,
+			p.ChallengeID,
+			p.Namespace,
+			p.Progress,
+			p.Status,
+			p.CompletedAt,
+			p.ClaimedAt,
+			p.IsActive,
+			p.AssignedAt,
+			p.ExpiresAt,
+		)
+	}
+
+	//nolint:gosec // Safe: valueStrings contains only parameterized placeholders like "($1, $2, $3)", not user input
+	query := fmt.Sprintf(`
+		INSERT INTO user_goal_progress (
+			user_id, goal_id, challenge_id, namespace,
+			progress, status, completed_at, claimed_at,
+			created_at, updated_at,
+			is_active, assigned_at, expires_at
+		) VALUES %s
+		ON CONFLICT (user_id, goal_id) DO NOTHING
+	`, strings.Join(valueStrings, ","))
+
+	_, err := r.tx.ExecContext(ctx, query, valueArgs...)
+	if err != nil {
+		return errors.ErrDatabaseError("bulk insert goals in transaction", err)
+	}
+
+	return nil
+}
+
+// UpsertGoalActive creates or updates a goal's is_active status within a transaction.
+func (r *PostgresTxRepository) UpsertGoalActive(ctx context.Context, progress *domain.UserGoalProgress) error {
+	query := `
+		INSERT INTO user_goal_progress (
+			user_id, goal_id, challenge_id, namespace,
+			progress, status, is_active, assigned_at,
+			created_at, updated_at
+		) VALUES (
+			$1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()
+		)
+		ON CONFLICT (user_id, goal_id) DO UPDATE SET
+			is_active = EXCLUDED.is_active,
+			assigned_at = CASE
+				WHEN EXCLUDED.is_active = true THEN NOW()
+				ELSE user_goal_progress.assigned_at
+			END,
+			updated_at = NOW()
+	`
+
+	_, err := r.tx.ExecContext(ctx, query,
+		progress.UserID,
+		progress.GoalID,
+		progress.ChallengeID,
+		progress.Namespace,
+		progress.Progress,
+		progress.Status,
+		progress.IsActive,
+		progress.AssignedAt,
+	)
+
+	if err != nil {
+		return errors.ErrDatabaseError("upsert goal active in transaction", err)
 	}
 
 	return nil
