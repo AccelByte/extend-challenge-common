@@ -36,7 +36,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		return nil
 	}
 
-	// Create table
+	// Create table (M3 schema with is_active, assigned_at, expires_at)
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_goal_progress (
 			user_id VARCHAR(100) NOT NULL,
@@ -49,6 +49,9 @@ func setupTestDB(t *testing.T) *sql.DB {
 			claimed_at TIMESTAMP NULL,
 			created_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+			is_active BOOLEAN NOT NULL DEFAULT true,
+			assigned_at TIMESTAMP NULL,
+			expires_at TIMESTAMP NULL,
 			PRIMARY KEY (user_id, goal_id),
 			CONSTRAINT check_status CHECK (status IN ('not_started', 'in_progress', 'completed', 'claimed')),
 			CONSTRAINT check_progress_non_negative CHECK (progress >= 0),
@@ -583,7 +586,7 @@ func TestPostgresGoalRepository_GetMethods(t *testing.T) {
 	})
 
 	t.Run("GetUserProgress returns all user's progress", func(t *testing.T) {
-		progress, err := repo.GetUserProgress(ctx, "user1")
+		progress, err := repo.GetUserProgress(ctx, "user1", false) // activeOnly = false
 		if err != nil {
 			t.Fatalf("GetUserProgress failed: %v", err)
 		}
@@ -594,7 +597,7 @@ func TestPostgresGoalRepository_GetMethods(t *testing.T) {
 	})
 
 	t.Run("GetChallengeProgress returns progress for specific challenge", func(t *testing.T) {
-		progress, err := repo.GetChallengeProgress(ctx, "user1", "challenge1")
+		progress, err := repo.GetChallengeProgress(ctx, "user1", "challenge1", false) // activeOnly = false
 		if err != nil {
 			t.Fatalf("GetChallengeProgress failed: %v", err)
 		}
@@ -612,7 +615,7 @@ func TestPostgresGoalRepository_GetMethods(t *testing.T) {
 	})
 
 	t.Run("GetChallengeProgress returns empty for user with no progress", func(t *testing.T) {
-		progress, err := repo.GetChallengeProgress(ctx, "nonexistent", "challenge1")
+		progress, err := repo.GetChallengeProgress(ctx, "nonexistent", "challenge1", false) // activeOnly = false
 		if err != nil {
 			t.Fatalf("GetChallengeProgress failed: %v", err)
 		}
@@ -909,7 +912,7 @@ func TestPostgresGoalRepository_Transaction(t *testing.T) {
 		}
 
 		// Test GetUserProgress in transaction
-		userProgress, err := tx.GetUserProgress(ctx, "user4")
+		userProgress, err := tx.GetUserProgress(ctx, "user4", false) // activeOnly = false
 		if err != nil {
 			t.Fatalf("GetUserProgress in tx failed: %v", err)
 		}
@@ -918,7 +921,7 @@ func TestPostgresGoalRepository_Transaction(t *testing.T) {
 		}
 
 		// Test GetChallengeProgress in transaction
-		challengeProgress, err := tx.GetChallengeProgress(ctx, "user4", "challenge1")
+		challengeProgress, err := tx.GetChallengeProgress(ctx, "user4", "challenge1", false) // activeOnly = false
 		if err != nil {
 			t.Fatalf("GetChallengeProgress in tx failed: %v", err)
 		}
@@ -1596,5 +1599,201 @@ func TestConfigureDB(t *testing.T) {
 	maxOpen := db.Stats().MaxOpenConnections
 	if maxOpen != 50 {
 		t.Errorf("MaxOpenConnections = %d, want 50", maxOpen)
+	}
+}
+
+// M3 Phase 4: Test activeOnly filtering
+
+func TestPostgresGoalRepository_GetUserProgress_ActiveOnly(t *testing.T) {
+	db := setupTestDB(t)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDB(t, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	userID := "user-123"
+	now := time.Now()
+
+	// Create 3 goals: 2 active, 1 inactive
+	goals := []*domain.UserGoalProgress{
+		{
+			UserID:      userID,
+			GoalID:      "goal-1",
+			ChallengeID: "challenge-1",
+			Namespace:   "test-ns",
+			Progress:    5,
+			Status:      "in_progress",
+			IsActive:    true,
+			AssignedAt:  &now,
+		},
+		{
+			UserID:      userID,
+			GoalID:      "goal-2",
+			ChallengeID: "challenge-1",
+			Namespace:   "test-ns",
+			Progress:    10,
+			Status:      "completed",
+			IsActive:    true,
+			AssignedAt:  &now,
+		},
+		{
+			UserID:      userID,
+			GoalID:      "goal-3",
+			ChallengeID: "challenge-2",
+			Namespace:   "test-ns",
+			Progress:    3,
+			Status:      "in_progress",
+			IsActive:    false, // Inactive goal
+			AssignedAt:  &now,
+		},
+	}
+
+	// Insert all goals
+	for _, goal := range goals {
+		err := repo.UpsertProgress(ctx, goal)
+		if err != nil {
+			t.Fatalf("Failed to insert goal: %v", err)
+		}
+	}
+
+	// Test 1: activeOnly = false (should return all 3 goals)
+	allGoals, err := repo.GetUserProgress(ctx, userID, false)
+	if err != nil {
+		t.Fatalf("GetUserProgress(activeOnly=false) failed: %v", err)
+	}
+
+	if len(allGoals) != 3 {
+		t.Errorf("GetUserProgress(activeOnly=false) returned %d goals, want 3", len(allGoals))
+	}
+
+	// Test 2: activeOnly = true (should return only 2 active goals)
+	activeGoals, err := repo.GetUserProgress(ctx, userID, true)
+	if err != nil {
+		t.Fatalf("GetUserProgress(activeOnly=true) failed: %v", err)
+	}
+
+	if len(activeGoals) != 2 {
+		t.Errorf("GetUserProgress(activeOnly=true) returned %d goals, want 2", len(activeGoals))
+	}
+
+	// Verify all returned goals are active
+	for _, goal := range activeGoals {
+		if !goal.IsActive {
+			t.Errorf("GetUserProgress(activeOnly=true) returned inactive goal: %s", goal.GoalID)
+		}
+	}
+
+	// Verify the active goals are the correct ones
+	activeGoalIDs := make(map[string]bool)
+	for _, goal := range activeGoals {
+		activeGoalIDs[goal.GoalID] = true
+	}
+
+	if !activeGoalIDs["goal-1"] || !activeGoalIDs["goal-2"] {
+		t.Errorf("GetUserProgress(activeOnly=true) did not return expected goals")
+	}
+}
+
+func TestPostgresGoalRepository_GetChallengeProgress_ActiveOnly(t *testing.T) {
+	db := setupTestDB(t)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDB(t, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	userID := "user-456"
+	challengeID := "challenge-multi"
+	now := time.Now()
+
+	// Create 4 goals in same challenge: 3 active, 1 inactive
+	goals := []*domain.UserGoalProgress{
+		{
+			UserID:      userID,
+			GoalID:      "goal-a",
+			ChallengeID: challengeID,
+			Namespace:   "test-ns",
+			Progress:    1,
+			Status:      "in_progress",
+			IsActive:    true,
+			AssignedAt:  &now,
+		},
+		{
+			UserID:      userID,
+			GoalID:      "goal-b",
+			ChallengeID: challengeID,
+			Namespace:   "test-ns",
+			Progress:    2,
+			Status:      "in_progress",
+			IsActive:    false, // Inactive
+			AssignedAt:  &now,
+		},
+		{
+			UserID:      userID,
+			GoalID:      "goal-c",
+			ChallengeID: challengeID,
+			Namespace:   "test-ns",
+			Progress:    3,
+			Status:      "completed",
+			IsActive:    true,
+			AssignedAt:  &now,
+		},
+		{
+			UserID:      userID,
+			GoalID:      "goal-d",
+			ChallengeID: challengeID,
+			Namespace:   "test-ns",
+			Progress:    4,
+			Status:      "in_progress",
+			IsActive:    true,
+			AssignedAt:  &now,
+		},
+	}
+
+	// Insert all goals
+	for _, goal := range goals {
+		err := repo.UpsertProgress(ctx, goal)
+		if err != nil {
+			t.Fatalf("Failed to insert goal: %v", err)
+		}
+	}
+
+	// Test 1: activeOnly = false (should return all 4 goals)
+	allGoals, err := repo.GetChallengeProgress(ctx, userID, challengeID, false)
+	if err != nil {
+		t.Fatalf("GetChallengeProgress(activeOnly=false) failed: %v", err)
+	}
+
+	if len(allGoals) != 4 {
+		t.Errorf("GetChallengeProgress(activeOnly=false) returned %d goals, want 4", len(allGoals))
+	}
+
+	// Test 2: activeOnly = true (should return only 3 active goals)
+	activeGoals, err := repo.GetChallengeProgress(ctx, userID, challengeID, true)
+	if err != nil {
+		t.Fatalf("GetChallengeProgress(activeOnly=true) failed: %v", err)
+	}
+
+	if len(activeGoals) != 3 {
+		t.Errorf("GetChallengeProgress(activeOnly=true) returned %d goals, want 3", len(activeGoals))
+	}
+
+	// Verify all returned goals are active
+	for _, goal := range activeGoals {
+		if !goal.IsActive {
+			t.Errorf("GetChallengeProgress(activeOnly=true) returned inactive goal: %s", goal.GoalID)
+		}
+	}
+
+	// Verify the inactive goal is not returned
+	for _, goal := range activeGoals {
+		if goal.GoalID == "goal-b" {
+			t.Errorf("GetChallengeProgress(activeOnly=true) should not return goal-b (inactive)")
+		}
 	}
 }

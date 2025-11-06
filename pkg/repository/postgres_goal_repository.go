@@ -64,15 +64,22 @@ func (r *PostgresGoalRepository) GetProgress(ctx context.Context, userID, goalID
 }
 
 // GetUserProgress retrieves all goal progress records for a specific user.
-func (r *PostgresGoalRepository) GetUserProgress(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
+// M3 Phase 4: activeOnly parameter filters to only is_active = true goals.
+func (r *PostgresGoalRepository) GetUserProgress(ctx context.Context, userID string, activeOnly bool) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
 		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1
-		ORDER BY created_at ASC
 	`
+
+	// M3 Phase 4: Add is_active filter when activeOnly is true
+	if activeOnly {
+		query += " AND is_active = true"
+	}
+
+	query += " ORDER BY created_at ASC"
 
 	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -84,15 +91,22 @@ func (r *PostgresGoalRepository) GetUserProgress(ctx context.Context, userID str
 }
 
 // GetChallengeProgress retrieves all goal progress for a user within a specific challenge.
-func (r *PostgresGoalRepository) GetChallengeProgress(ctx context.Context, userID, challengeID string) ([]*domain.UserGoalProgress, error) {
+// M3 Phase 4: activeOnly parameter filters to only is_active = true goals.
+func (r *PostgresGoalRepository) GetChallengeProgress(ctx context.Context, userID, challengeID string, activeOnly bool) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
 		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND challenge_id = $2
-		ORDER BY created_at ASC
 	`
+
+	// M3 Phase 4: Add is_active filter when activeOnly is true
+	if activeOnly {
+		query += " AND is_active = true"
+	}
+
+	query += " ORDER BY created_at ASC"
 
 	rows, err := r.db.QueryContext(ctx, query, userID, challengeID)
 	if err != nil {
@@ -820,15 +834,22 @@ func (r *PostgresTxRepository) GetProgressForUpdate(ctx context.Context, userID,
 }
 
 // GetUserProgress retrieves all user progress within a transaction.
-func (r *PostgresTxRepository) GetUserProgress(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
+// M3 Phase 4: activeOnly parameter filters to only is_active = true goals.
+func (r *PostgresTxRepository) GetUserProgress(ctx context.Context, userID string, activeOnly bool) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
 		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1
-		ORDER BY created_at ASC
 	`
+
+	// M3 Phase 4: Add is_active filter when activeOnly is true
+	if activeOnly {
+		query += " AND is_active = true"
+	}
+
+	query += " ORDER BY created_at ASC"
 
 	rows, err := r.tx.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -840,15 +861,22 @@ func (r *PostgresTxRepository) GetUserProgress(ctx context.Context, userID strin
 }
 
 // GetChallengeProgress retrieves challenge progress within a transaction.
-func (r *PostgresTxRepository) GetChallengeProgress(ctx context.Context, userID, challengeID string) ([]*domain.UserGoalProgress, error) {
+// M3 Phase 4: activeOnly parameter filters to only is_active = true goals.
+func (r *PostgresTxRepository) GetChallengeProgress(ctx context.Context, userID, challengeID string, activeOnly bool) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
 		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND challenge_id = $2
-		ORDER BY created_at ASC
 	`
+
+	// M3 Phase 4: Add is_active filter when activeOnly is true
+	if activeOnly {
+		query += " AND is_active = true"
+	}
+
+	query += " ORDER BY created_at ASC"
 
 	rows, err := r.tx.QueryContext(ctx, query, userID, challengeID)
 	if err != nil {

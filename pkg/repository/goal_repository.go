@@ -27,11 +27,13 @@ type GoalRepository interface {
 
 	// GetUserProgress retrieves all goal progress records for a specific user.
 	// Returns empty slice if user has no progress records.
-	GetUserProgress(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error)
+	// M3 Phase 4: activeOnly parameter filters to only is_active = true goals.
+	GetUserProgress(ctx context.Context, userID string, activeOnly bool) ([]*domain.UserGoalProgress, error)
 
 	// GetChallengeProgress retrieves all goal progress for a user within a specific challenge.
 	// Returns empty slice if user has no progress for this challenge.
-	GetChallengeProgress(ctx context.Context, userID, challengeID string) ([]*domain.UserGoalProgress, error)
+	// M3 Phase 4: activeOnly parameter filters to only is_active = true goals.
+	GetChallengeProgress(ctx context.Context, userID, challengeID string, activeOnly bool) ([]*domain.UserGoalProgress, error)
 
 	// UpsertProgress creates or updates a single goal progress record.
 	// Uses INSERT ... ON CONFLICT (user_id, goal_id) DO UPDATE.
