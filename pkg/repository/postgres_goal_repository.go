@@ -292,6 +292,7 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 
 	// Step 5: Merge temp table into main table with ON CONFLICT logic
 	// This maintains the same upsert semantics as BatchUpsertProgress
+	// M3: Only update assigned goals (is_active = true)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO user_goal_progress (
 			user_id, goal_id, challenge_id, namespace,
@@ -307,6 +308,7 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 			completed_at = EXCLUDED.completed_at,
 			updated_at = NOW()
 		WHERE user_goal_progress.status != 'claimed'
+		  AND user_goal_progress.is_active = true
 	`)
 	if err != nil {
 		return errors.ErrDatabaseError("merge temp table into user_goal_progress", err)
@@ -416,6 +418,7 @@ func (r *PostgresGoalRepository) incrementProgressDaily(ctx context.Context, use
 			END,
 			updated_at = NOW()  -- Always update timestamp (for daily tracking)
 		WHERE user_goal_progress.status != 'claimed'
+		  AND user_goal_progress.is_active = true
 	`
 
 	_, err := r.db.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
@@ -540,6 +543,7 @@ func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, inc
 			END,
 			updated_at = NOW()
 		WHERE user_goal_progress.status != 'claimed'
+		  AND user_goal_progress.is_active = true
 	`
 
 	_, err := r.db.ExecContext(ctx, query,

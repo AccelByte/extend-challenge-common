@@ -523,6 +523,179 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 			t.Errorf("Goal status = %s, want claimed", progress.Status)
 		}
 	})
+
+	// M3 Phase 5: Assignment control tests
+	t.Run("M3: event updates assigned goal (is_active = true)", func(t *testing.T) {
+		// 1. Create goal with is_active = true
+		now := time.Now()
+		initial := &domain.UserGoalProgress{
+			UserID:      "m3-user1",
+			GoalID:      "m3-goal1",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    5,
+			Status:      domain.GoalStatusInProgress,
+			IsActive:    true,
+			AssignedAt:  &now,
+		}
+		err := repo.UpsertProgress(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// 2. Simulate event update (progress = 10)
+		updates := []*domain.UserGoalProgress{
+			{
+				UserID:      "m3-user1",
+				GoalID:      "m3-goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusCompleted,
+			},
+		}
+		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
+		if err != nil {
+			t.Fatalf("BatchUpsertProgressWithCOPY failed: %v", err)
+		}
+
+		// 3. Verify row was updated
+		result, err := repo.GetProgress(ctx, "m3-user1", "m3-goal1")
+		if err != nil {
+			t.Fatalf("GetProgress failed: %v", err)
+		}
+		if result.Progress != 10 {
+			t.Errorf("Progress = %d, want 10 (should be updated)", result.Progress)
+		}
+		if result.Status != domain.GoalStatusCompleted {
+			t.Errorf("Status = %s, want completed", result.Status)
+		}
+	})
+
+	t.Run("M3: event does NOT update unassigned goal (is_active = false)", func(t *testing.T) {
+		// 1. Create goal with is_active = false
+		now := time.Now()
+		initial := &domain.UserGoalProgress{
+			UserID:      "m3-user2",
+			GoalID:      "m3-goal2",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    5,
+			Status:      domain.GoalStatusInProgress,
+			IsActive:    false, // ← Unassigned
+			AssignedAt:  &now,
+		}
+		err := repo.UpsertProgress(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// 2. Simulate event update (progress = 10)
+		updates := []*domain.UserGoalProgress{
+			{
+				UserID:      "m3-user2",
+				GoalID:      "m3-goal2",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusCompleted,
+			},
+		}
+		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
+		if err != nil {
+			t.Fatalf("BatchUpsertProgressWithCOPY should not error: %v", err)
+		}
+
+		// 3. Verify row was NOT updated (progress still 5)
+		result, err := repo.GetProgress(ctx, "m3-user2", "m3-goal2")
+		if err != nil {
+			t.Fatalf("GetProgress failed: %v", err)
+		}
+		if result.Progress != 5 {
+			t.Errorf("Progress = %d, want 5 (should NOT be updated)", result.Progress)
+		}
+		if result.Status != domain.GoalStatusInProgress {
+			t.Errorf("Status = %s, want in_progress", result.Status)
+		}
+	})
+
+	t.Run("M3: activate, event updates, deactivate, event does NOT update", func(t *testing.T) {
+		// 1. Create assigned goal
+		now := time.Now()
+		initial := &domain.UserGoalProgress{
+			UserID:      "m3-user3",
+			GoalID:      "m3-goal3",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    0,
+			Status:      domain.GoalStatusNotStarted,
+			IsActive:    true,
+			AssignedAt:  &now,
+		}
+		err := repo.UpsertProgress(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// 2. Event updates assigned goal
+		updates1 := []*domain.UserGoalProgress{
+			{
+				UserID:      "m3-user3",
+				GoalID:      "m3-goal3",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    5,
+				Status:      domain.GoalStatusInProgress,
+			},
+		}
+		err = repo.BatchUpsertProgressWithCOPY(ctx, updates1)
+		if err != nil {
+			t.Fatalf("First update failed: %v", err)
+		}
+
+		// Verify update worked
+		result, _ := repo.GetProgress(ctx, "m3-user3", "m3-goal3")
+		if result.Progress != 5 {
+			t.Errorf("After first update: progress = %d, want 5", result.Progress)
+		}
+
+		// 3. Deactivate goal
+		err = repo.UpsertGoalActive(ctx, &domain.UserGoalProgress{
+			UserID:      "m3-user3",
+			GoalID:      "m3-goal3",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			IsActive:    false,
+		})
+		if err != nil {
+			t.Fatalf("Deactivation failed: %v", err)
+		}
+
+		// 4. Event should NOT update unassigned goal
+		updates2 := []*domain.UserGoalProgress{
+			{
+				UserID:      "m3-user3",
+				GoalID:      "m3-goal3",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusCompleted,
+			},
+		}
+		err = repo.BatchUpsertProgressWithCOPY(ctx, updates2)
+		if err != nil {
+			t.Fatalf("Second update failed: %v", err)
+		}
+
+		// Verify update was blocked
+		result, _ = repo.GetProgress(ctx, "m3-user3", "m3-goal3")
+		if result.Progress != 5 {
+			t.Errorf("After deactivation: progress = %d, want 5 (should NOT be updated)", result.Progress)
+		}
+		if result.Status != domain.GoalStatusInProgress {
+			t.Errorf("After deactivation: status = %s, want in_progress", result.Status)
+		}
+	})
 }
 
 func TestPostgresGoalRepository_GetMethods(t *testing.T) {
@@ -1418,6 +1591,174 @@ func TestPostgresGoalRepository_BatchIncrementProgress(t *testing.T) {
 		retrieved, _ := repo.GetProgress(ctx, "user7", "goal1")
 		if retrieved.Progress != 10 {
 			t.Errorf("Progress = %d, want 10 (claimed goals should not be updated)", retrieved.Progress)
+		}
+	})
+
+	// M3 Phase 5: Assignment control tests for BatchIncrementProgress
+	t.Run("M3: increment updates assigned goal (is_active = true)", func(t *testing.T) {
+		// 1. Create goal with is_active = true
+		now := time.Now()
+		initial := &domain.UserGoalProgress{
+			UserID:      "m3-batch-user1",
+			GoalID:      "m3-batch-goal1",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    5,
+			Status:      domain.GoalStatusInProgress,
+			IsActive:    true,
+			AssignedAt:  &now,
+		}
+		err := repo.UpsertProgress(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// 2. Simulate increment event
+		increments := []ProgressIncrement{
+			{
+				UserID:           "m3-batch-user1",
+				GoalID:           "m3-batch-goal1",
+				ChallengeID:      "challenge1",
+				Namespace:        "test",
+				Delta:            3,
+				TargetValue:      10,
+				IsDailyIncrement: false,
+			},
+		}
+		err = repo.BatchIncrementProgress(ctx, increments)
+		if err != nil {
+			t.Fatalf("BatchIncrementProgress failed: %v", err)
+		}
+
+		// 3. Verify row was updated (5 + 3 = 8)
+		result, err := repo.GetProgress(ctx, "m3-batch-user1", "m3-batch-goal1")
+		if err != nil {
+			t.Fatalf("GetProgress failed: %v", err)
+		}
+		if result.Progress != 8 {
+			t.Errorf("Progress = %d, want 8 (5+3, should be updated)", result.Progress)
+		}
+	})
+
+	t.Run("M3: increment does NOT update unassigned goal (is_active = false)", func(t *testing.T) {
+		// 1. Create goal with is_active = false
+		now := time.Now()
+		initial := &domain.UserGoalProgress{
+			UserID:      "m3-batch-user2",
+			GoalID:      "m3-batch-goal2",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    5,
+			Status:      domain.GoalStatusInProgress,
+			IsActive:    false, // ← Unassigned
+			AssignedAt:  &now,
+		}
+		err := repo.UpsertProgress(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// 2. Simulate increment event
+		increments := []ProgressIncrement{
+			{
+				UserID:           "m3-batch-user2",
+				GoalID:           "m3-batch-goal2",
+				ChallengeID:      "challenge1",
+				Namespace:        "test",
+				Delta:            3,
+				TargetValue:      10,
+				IsDailyIncrement: false,
+			},
+		}
+		err = repo.BatchIncrementProgress(ctx, increments)
+		if err != nil {
+			t.Fatalf("BatchIncrementProgress should not error: %v", err)
+		}
+
+		// 3. Verify row was NOT updated (still 5)
+		result, err := repo.GetProgress(ctx, "m3-batch-user2", "m3-batch-goal2")
+		if err != nil {
+			t.Fatalf("GetProgress failed: %v", err)
+		}
+		if result.Progress != 5 {
+			t.Errorf("Progress = %d, want 5 (should NOT be updated)", result.Progress)
+		}
+	})
+
+	t.Run("M3: activate, increment updates, deactivate, increment does NOT update", func(t *testing.T) {
+		// 1. Create assigned goal
+		now := time.Now()
+		initial := &domain.UserGoalProgress{
+			UserID:      "m3-batch-user3",
+			GoalID:      "m3-batch-goal3",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    0,
+			Status:      domain.GoalStatusNotStarted,
+			IsActive:    true,
+			AssignedAt:  &now,
+		}
+		err := repo.UpsertProgress(ctx, initial)
+		if err != nil {
+			t.Fatalf("Initial insert failed: %v", err)
+		}
+
+		// 2. Increment updates assigned goal
+		increments1 := []ProgressIncrement{
+			{
+				UserID:           "m3-batch-user3",
+				GoalID:           "m3-batch-goal3",
+				ChallengeID:      "challenge1",
+				Namespace:        "test",
+				Delta:            5,
+				TargetValue:      10,
+				IsDailyIncrement: false,
+			},
+		}
+		err = repo.BatchIncrementProgress(ctx, increments1)
+		if err != nil {
+			t.Fatalf("First increment failed: %v", err)
+		}
+
+		// Verify update worked
+		result, _ := repo.GetProgress(ctx, "m3-batch-user3", "m3-batch-goal3")
+		if result.Progress != 5 {
+			t.Errorf("After first increment: progress = %d, want 5", result.Progress)
+		}
+
+		// 3. Deactivate goal
+		err = repo.UpsertGoalActive(ctx, &domain.UserGoalProgress{
+			UserID:      "m3-batch-user3",
+			GoalID:      "m3-batch-goal3",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			IsActive:    false,
+		})
+		if err != nil {
+			t.Fatalf("Deactivation failed: %v", err)
+		}
+
+		// 4. Increment should NOT update unassigned goal
+		increments2 := []ProgressIncrement{
+			{
+				UserID:           "m3-batch-user3",
+				GoalID:           "m3-batch-goal3",
+				ChallengeID:      "challenge1",
+				Namespace:        "test",
+				Delta:            3,
+				TargetValue:      10,
+				IsDailyIncrement: false,
+			},
+		}
+		err = repo.BatchIncrementProgress(ctx, increments2)
+		if err != nil {
+			t.Fatalf("Second increment failed: %v", err)
+		}
+
+		// Verify update was blocked
+		result, _ = repo.GetProgress(ctx, "m3-batch-user3", "m3-batch-goal3")
+		if result.Progress != 5 {
+			t.Errorf("After deactivation: progress = %d, want 5 (should NOT be updated)", result.Progress)
 		}
 	})
 }
