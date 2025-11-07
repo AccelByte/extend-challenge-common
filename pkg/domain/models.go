@@ -178,8 +178,9 @@ func (p *UserGoalProgress) IsClaimed() bool {
 }
 
 // CanClaim returns true if the goal can be claimed (completed but not yet claimed).
+// M3 Phase 6: Goal must be active and completed to claim.
 func (p *UserGoalProgress) CanClaim() bool {
-	return p.Status == GoalStatusCompleted
+	return p.IsActive && p.Status == GoalStatusCompleted
 }
 
 // MeetsRequirement returns true if the current progress meets the goal's requirement.

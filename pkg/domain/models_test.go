@@ -151,28 +151,49 @@ func TestUserGoalProgress_CanClaim(t *testing.T) {
 		{
 			name: "not_started cannot claim",
 			progress: &UserGoalProgress{
-				Status: GoalStatusNotStarted,
+				Status:   GoalStatusNotStarted,
+				IsActive: true,
 			},
 			want: false,
 		},
 		{
 			name: "in_progress cannot claim",
 			progress: &UserGoalProgress{
-				Status: GoalStatusInProgress,
+				Status:   GoalStatusInProgress,
+				IsActive: true,
 			},
 			want: false,
 		},
 		{
-			name: "completed can claim",
+			name: "completed and active can claim",
 			progress: &UserGoalProgress{
-				Status: GoalStatusCompleted,
+				Status:   GoalStatusCompleted,
+				IsActive: true,
 			},
 			want: true,
 		},
 		{
 			name: "claimed cannot claim",
 			progress: &UserGoalProgress{
-				Status: GoalStatusClaimed,
+				Status:   GoalStatusClaimed,
+				IsActive: true,
+			},
+			want: false,
+		},
+		// M3 Phase 6: Test is_active validation
+		{
+			name: "completed but inactive cannot claim",
+			progress: &UserGoalProgress{
+				Status:   GoalStatusCompleted,
+				IsActive: false,
+			},
+			want: false,
+		},
+		{
+			name: "in_progress and inactive cannot claim",
+			progress: &UserGoalProgress{
+				Status:   GoalStatusInProgress,
+				IsActive: false,
 			},
 			want: false,
 		},
@@ -276,6 +297,7 @@ func TestUserGoalProgress_StatusTransitions(t *testing.T) {
 		Namespace:   "test",
 		Progress:    0,
 		Status:      GoalStatusNotStarted,
+		IsActive:    true, // M3 Phase 6: Goal must be active to claim
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
