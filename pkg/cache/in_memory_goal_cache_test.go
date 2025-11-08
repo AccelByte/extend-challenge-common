@@ -204,24 +204,25 @@ func TestInMemoryGoalCache_Reload(t *testing.T) {
 		tmpFile := createTempConfigFile(t, `{
 			"challenges": [
 				{
-					"id": "challenge-new",
+					"challengeId": "challenge-new",
 					"name": "New Challenge",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-new",
+							"goalId": "goal-new",
 							"name": "New Goal",
 							"description": "Description",
+							"challengeId": "challenge-new",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "new_stat",
+								"statCode": "new_stat",
 								"operator": ">=",
-								"target_value": 100
+								"targetValue": 100
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "new_item",
+								"rewardId": "new_item",
 								"quantity": 1
 							},
 							"prerequisites": []

@@ -5,7 +5,7 @@ import "time"
 // Challenge represents a collection of goals that users can complete.
 // A challenge groups related goals together (e.g., "Winter Challenge", "Daily Quests").
 type Challenge struct {
-	ID          string  `json:"id"`
+	ID          string  `json:"challengeId"`
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	Goals       []*Goal `json:"goals"`
@@ -80,14 +80,14 @@ func (t GoalType) IsValid() bool {
 // Goal represents a single objective that users can complete to earn rewards.
 // Goals track progress via stat codes from AGS events.
 type Goal struct {
-	ID              string      `json:"id"`
+	ID              string      `json:"goalId"`
 	Name            string      `json:"name"`
 	Description     string      `json:"description"`
-	ChallengeID     string      `json:"challenge_id"`     // Parent challenge ID
-	Type            GoalType    `json:"type"`             // How progress is tracked (absolute, increment, daily)
-	EventSource     EventSource `json:"event_source"`     // Which event stream triggers this goal (login, statistic)
-	Daily           bool        `json:"daily"`            // For increment type: true = count once per day, false = count every occurrence
-	DefaultAssigned bool        `json:"default_assigned"` // M3: Whether goal is assigned by default to new players
+	ChallengeID     string      `json:"challengeId"`     // Parent challenge ID
+	Type            GoalType    `json:"type"`            // How progress is tracked (absolute, increment, daily)
+	EventSource     EventSource `json:"eventSource"`     // Which event stream triggers this goal (login, statistic)
+	Daily           bool        `json:"daily"`           // For increment type: true = count once per day, false = count every occurrence
+	DefaultAssigned bool        `json:"defaultAssigned"` // M3: Whether goal is assigned by default to new players
 	Requirement     Requirement `json:"requirement"`
 	Reward          Reward      `json:"reward"`
 	Prerequisites   []string    `json:"prerequisites"` // Goal IDs that must be completed first
@@ -95,9 +95,9 @@ type Goal struct {
 
 // Requirement defines the condition that must be met to complete a goal.
 type Requirement struct {
-	StatCode    string `json:"stat_code"`    // Event field to track (e.g., "snowman_kills")
-	Operator    string `json:"operator"`     // Comparison operator (only ">=" in M1)
-	TargetValue int    `json:"target_value"` // Goal threshold
+	StatCode    string `json:"statCode"`    // Event field to track (e.g., "snowman_kills")
+	Operator    string `json:"operator"`    // Comparison operator (only ">=" in M1)
+	TargetValue int    `json:"targetValue"` // Goal threshold
 }
 
 // RewardType defines the type of reward granted to the user.
@@ -113,31 +113,31 @@ const (
 
 // Reward defines what the user receives upon claiming a completed goal.
 type Reward struct {
-	Type     string `json:"type"`      // "ITEM" or "WALLET"
-	RewardID string `json:"reward_id"` // Item code or currency code
-	Quantity int    `json:"quantity"`  // Amount to grant
+	Type     string `json:"type"`     // "ITEM" or "WALLET"
+	RewardID string `json:"rewardId"` // Item code or currency code
+	Quantity int    `json:"quantity"` // Amount to grant
 }
 
 // UserGoalProgress tracks a user's progress toward completing a specific goal.
 // Rows are lazily initialized (created on-demand when progress is first updated).
 type UserGoalProgress struct {
-	UserID      string     `json:"user_id" db:"user_id"`
-	GoalID      string     `json:"goal_id" db:"goal_id"`
-	ChallengeID string     `json:"challenge_id" db:"challenge_id"`
+	UserID      string     `json:"userId" db:"user_id"`
+	GoalID      string     `json:"goalId" db:"goal_id"`
+	ChallengeID string     `json:"challengeId" db:"challenge_id"`
 	Namespace   string     `json:"namespace" db:"namespace"`
 	Progress    int        `json:"progress" db:"progress"`
 	Status      GoalStatus `json:"status" db:"status"`
-	CompletedAt *time.Time `json:"completed_at,omitempty" db:"completed_at"`
-	ClaimedAt   *time.Time `json:"claimed_at,omitempty" db:"claimed_at"`
-	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
+	CompletedAt *time.Time `json:"completedAt,omitempty" db:"completed_at"`
+	ClaimedAt   *time.Time `json:"claimedAt,omitempty" db:"claimed_at"`
+	CreatedAt   time.Time  `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time  `json:"updatedAt" db:"updated_at"`
 
 	// M3: User assignment control
-	IsActive   bool       `json:"is_active" db:"is_active"`
-	AssignedAt *time.Time `json:"assigned_at,omitempty" db:"assigned_at"`
+	IsActive   bool       `json:"isActive" db:"is_active"`
+	AssignedAt *time.Time `json:"assignedAt,omitempty" db:"assigned_at"`
 
 	// M5: System rotation control (added now for forward compatibility)
-	ExpiresAt *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty" db:"expires_at"`
 }
 
 // GoalStatus represents the current state of a user's progress on a goal.

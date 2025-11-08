@@ -18,24 +18,24 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 		tmpFile := createTempConfigFile(t, `{
 			"challenges": [
 				{
-					"id": "challenge-1",
+					"challengeId": "challenge-1",
 					"name": "Challenge 1",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-1",
+							"goalId": "goal-1",
 							"name": "Goal 1",
 							"description": "Description",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code",
+								"statCode": "stat_code",
 								"operator": ">=",
-								"target_value": 10
+								"targetValue": 10
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_1",
+								"rewardId": "item_1",
 								"quantity": 1
 							},
 							"prerequisites": []
@@ -120,42 +120,42 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 		tmpFile := createTempConfigFile(t, `{
 			"challenges": [
 				{
-					"id": "challenge-1",
+					"challengeId": "challenge-1",
 					"name": "Challenge 1",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-1",
+							"goalId": "goal-1",
 							"name": "Goal 1",
 							"description": "Description",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code",
+								"statCode": "stat_code",
 								"operator": ">=",
-								"target_value": 10
+								"targetValue": 10
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_1",
+								"rewardId": "item_1",
 								"quantity": 1
 							},
 							"prerequisites": []
 						},
 						{
-							"id": "goal-1",
+							"goalId": "goal-1",
 							"name": "Goal 2",
 							"description": "Description",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code",
+								"statCode": "stat_code",
 								"operator": ">=",
-								"target_value": 10
+								"targetValue": 10
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_1",
+								"rewardId": "item_1",
 								"quantity": 1
 							},
 							"prerequisites": []
@@ -182,42 +182,42 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 		tmpFile := createTempConfigFile(t, `{
 			"challenges": [
 				{
-					"id": "challenge-1",
+					"challengeId": "challenge-1",
 					"name": "Challenge 1",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-1",
+							"goalId": "goal-1",
 							"name": "Goal 1",
 							"description": "Description",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code_1",
+								"statCode": "stat_code_1",
 								"operator": ">=",
-								"target_value": 10
+								"targetValue": 10
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_1",
+								"rewardId": "item_1",
 								"quantity": 1
 							},
 							"prerequisites": []
 						},
 						{
-							"id": "goal-2",
+							"goalId": "goal-2",
 							"name": "Goal 2",
 							"description": "Description",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code_2",
+								"statCode": "stat_code_2",
 								"operator": ">=",
-								"target_value": 20
+								"targetValue": 20
 							},
 							"reward": {
 								"type": "WALLET",
-								"reward_id": "GOLD",
+								"rewardId": "GOLD",
 								"quantity": 100
 							},
 							"prerequisites": ["goal-1"]
@@ -225,24 +225,24 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 					]
 				},
 				{
-					"id": "challenge-2",
+					"challengeId": "challenge-2",
 					"name": "Challenge 2",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-3",
+							"goalId": "goal-3",
 							"name": "Goal 3",
 							"description": "Description",
 							"type": "absolute",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code_3",
+								"statCode": "stat_code_3",
 								"operator": ">=",
-								"target_value": 30
+								"targetValue": 30
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_3",
+								"rewardId": "item_3",
 								"quantity": 1
 							},
 							"prerequisites": []
@@ -288,23 +288,23 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 		tmpFile := createTempConfigFile(t, `{
 			"challenges": [
 				{
-					"id": "challenge-1",
+					"challengeId": "challenge-1",
 					"name": "Challenge 1",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-1",
+							"goalId": "goal-1",
 							"name": "Goal 1",
 							"description": "Description",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code",
+								"statCode": "stat_code",
 								"operator": ">=",
-								"target_value": 10
+								"targetValue": 10
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_1",
+								"rewardId": "item_1",
 								"quantity": 1
 							},
 							"prerequisites": []
@@ -336,24 +336,24 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 		tmpFile := createTempConfigFile(t, `{
 			"challenges": [
 				{
-					"id": "challenge-1",
+					"challengeId": "challenge-1",
 					"name": "Challenge 1",
 					"description": "Description",
 					"goals": [
 						{
-							"id": "goal-1",
+							"goalId": "goal-1",
 							"name": "Goal 1",
 							"description": "Description",
 							"type": "",
-							"event_source": "statistic",
+							"eventSource": "statistic",
 							"requirement": {
-								"stat_code": "stat_code",
+								"statCode": "stat_code",
 								"operator": ">=",
-								"target_value": 10
+								"targetValue": 10
 							},
 							"reward": {
 								"type": "ITEM",
-								"reward_id": "item_1",
+								"rewardId": "item_1",
 								"quantity": 1
 							},
 							"prerequisites": []
