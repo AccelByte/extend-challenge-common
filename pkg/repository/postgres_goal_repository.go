@@ -119,18 +119,23 @@ func (r *PostgresGoalRepository) GetChallengeProgress(ctx context.Context, userI
 
 // UpsertProgress creates or updates a single goal progress record.
 func (r *PostgresGoalRepository) UpsertProgress(ctx context.Context, progress *domain.UserGoalProgress) error {
+	// M3 Phase 5: Include is_active, assigned_at, expires_at fields
 	query := `
 		INSERT INTO user_goal_progress (
 			user_id, goal_id, challenge_id, namespace,
-			progress, status, completed_at, updated_at
+			progress, status, completed_at, updated_at,
+			is_active, assigned_at, expires_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, NOW()
+			$1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9, $10
 		)
 		ON CONFLICT (user_id, goal_id) DO UPDATE SET
 			progress = EXCLUDED.progress,
 			status = EXCLUDED.status,
 			completed_at = EXCLUDED.completed_at,
-			updated_at = NOW()
+			updated_at = NOW(),
+			is_active = EXCLUDED.is_active,
+			assigned_at = EXCLUDED.assigned_at,
+			expires_at = EXCLUDED.expires_at
 		WHERE user_goal_progress.status != 'claimed'
 	`
 
@@ -142,6 +147,9 @@ func (r *PostgresGoalRepository) UpsertProgress(ctx context.Context, progress *d
 		progress.Progress,
 		progress.Status,
 		progress.CompletedAt,
+		progress.IsActive,
+		progress.AssignedAt,
+		progress.ExpiresAt,
 	)
 
 	if err != nil {
@@ -626,14 +634,14 @@ func (r *PostgresGoalRepository) BulkInsert(ctx context.Context, progresses []*d
 		return nil
 	}
 
-	// Build values for bulk insert
+	// Build values for bulk insert (11 parameters per row)
 	valueStrings := make([]string, 0, len(progresses))
-	valueArgs := make([]interface{}, 0, len(progresses)*13)
+	valueArgs := make([]interface{}, 0, len(progresses)*11)
 
 	for i, p := range progresses {
 		valueStrings = append(valueStrings, fmt.Sprintf(
 			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d)",
-			i*13+1, i*13+2, i*13+3, i*13+4, i*13+5, i*13+6, i*13+7, i*13+8, i*13+9, i*13+10, i*13+11,
+			i*11+1, i*11+2, i*11+3, i*11+4, i*11+5, i*11+6, i*11+7, i*11+8, i*11+9, i*11+10, i*11+11,
 		))
 
 		valueArgs = append(valueArgs,
@@ -672,36 +680,62 @@ func (r *PostgresGoalRepository) BulkInsert(ctx context.Context, progresses []*d
 
 // UpsertGoalActive creates or updates a goal's is_active status.
 func (r *PostgresGoalRepository) UpsertGoalActive(ctx context.Context, progress *domain.UserGoalProgress) error {
+	// M3 Phase 5: UpsertGoalActive is designed to toggle is_active on existing rows.
+	// Use UPDATE instead of INSERT...ON CONFLICT to avoid check constraint violations
+	// when Status field is empty.
 	query := `
-		INSERT INTO user_goal_progress (
-			user_id, goal_id, challenge_id, namespace,
-			progress, status, is_active, assigned_at,
-			created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()
-		)
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			is_active = EXCLUDED.is_active,
+		UPDATE user_goal_progress SET
+			is_active = $1,
 			assigned_at = CASE
-				WHEN EXCLUDED.is_active = true THEN NOW()
-				ELSE user_goal_progress.assigned_at
+				WHEN $1 = true THEN NOW()
+				ELSE assigned_at
 			END,
 			updated_at = NOW()
+		WHERE user_id = $2
+		  AND goal_id = $3
 	`
 
-	_, err := r.db.ExecContext(ctx, query,
+	result, err := r.db.ExecContext(ctx, query,
+		progress.IsActive,
 		progress.UserID,
 		progress.GoalID,
-		progress.ChallengeID,
-		progress.Namespace,
-		progress.Progress,
-		progress.Status,
-		progress.IsActive,
-		progress.AssignedAt,
 	)
 
 	if err != nil {
-		return errors.ErrDatabaseError("upsert goal active", err)
+		return errors.ErrDatabaseError("update goal active", err)
+	}
+
+	// Check if the row was actually updated
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.ErrDatabaseError("check rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		// Row doesn't exist - insert with sensible defaults
+		insertQuery := `
+			INSERT INTO user_goal_progress (
+				user_id, goal_id, challenge_id, namespace,
+				progress, status, is_active, assigned_at,
+				created_at, updated_at
+			) VALUES (
+				$1, $2, $3, $4, 0, 'not_started', $5,
+				CASE WHEN $5 = true THEN NOW() ELSE NULL END,
+				NOW(), NOW()
+			)
+		`
+
+		_, err = r.db.ExecContext(ctx, insertQuery,
+			progress.UserID,
+			progress.GoalID,
+			progress.ChallengeID,
+			progress.Namespace,
+			progress.IsActive,
+		)
+
+		if err != nil {
+			return errors.ErrDatabaseError("insert goal active", err)
+		}
 	}
 
 	return nil
@@ -1350,14 +1384,14 @@ func (r *PostgresTxRepository) BulkInsert(ctx context.Context, progresses []*dom
 		return nil
 	}
 
-	// Build values for bulk insert
+	// Build values for bulk insert (11 parameters per row)
 	valueStrings := make([]string, 0, len(progresses))
-	valueArgs := make([]interface{}, 0, len(progresses)*13)
+	valueArgs := make([]interface{}, 0, len(progresses)*11)
 
 	for i, p := range progresses {
 		valueStrings = append(valueStrings, fmt.Sprintf(
 			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d)",
-			i*13+1, i*13+2, i*13+3, i*13+4, i*13+5, i*13+6, i*13+7, i*13+8, i*13+9, i*13+10, i*13+11,
+			i*11+1, i*11+2, i*11+3, i*11+4, i*11+5, i*11+6, i*11+7, i*11+8, i*11+9, i*11+10, i*11+11,
 		))
 
 		valueArgs = append(valueArgs,
@@ -1396,36 +1430,62 @@ func (r *PostgresTxRepository) BulkInsert(ctx context.Context, progresses []*dom
 
 // UpsertGoalActive creates or updates a goal's is_active status within a transaction.
 func (r *PostgresTxRepository) UpsertGoalActive(ctx context.Context, progress *domain.UserGoalProgress) error {
+	// M3 Phase 5: UpsertGoalActive is designed to toggle is_active on existing rows.
+	// Use UPDATE instead of INSERT...ON CONFLICT to avoid check constraint violations
+	// when Status field is empty.
 	query := `
-		INSERT INTO user_goal_progress (
-			user_id, goal_id, challenge_id, namespace,
-			progress, status, is_active, assigned_at,
-			created_at, updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()
-		)
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			is_active = EXCLUDED.is_active,
+		UPDATE user_goal_progress SET
+			is_active = $1,
 			assigned_at = CASE
-				WHEN EXCLUDED.is_active = true THEN NOW()
-				ELSE user_goal_progress.assigned_at
+				WHEN $1 = true THEN NOW()
+				ELSE assigned_at
 			END,
 			updated_at = NOW()
+		WHERE user_id = $2
+		  AND goal_id = $3
 	`
 
-	_, err := r.tx.ExecContext(ctx, query,
+	result, err := r.tx.ExecContext(ctx, query,
+		progress.IsActive,
 		progress.UserID,
 		progress.GoalID,
-		progress.ChallengeID,
-		progress.Namespace,
-		progress.Progress,
-		progress.Status,
-		progress.IsActive,
-		progress.AssignedAt,
 	)
 
 	if err != nil {
-		return errors.ErrDatabaseError("upsert goal active in transaction", err)
+		return errors.ErrDatabaseError("update goal active in transaction", err)
+	}
+
+	// Check if the row was actually updated
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return errors.ErrDatabaseError("check rows affected", err)
+	}
+
+	if rowsAffected == 0 {
+		// Row doesn't exist - insert with sensible defaults
+		insertQuery := `
+			INSERT INTO user_goal_progress (
+				user_id, goal_id, challenge_id, namespace,
+				progress, status, is_active, assigned_at,
+				created_at, updated_at
+			) VALUES (
+				$1, $2, $3, $4, 0, 'not_started', $5,
+				CASE WHEN $5 = true THEN NOW() ELSE NULL END,
+				NOW(), NOW()
+			)
+		`
+
+		_, err = r.tx.ExecContext(ctx, insertQuery,
+			progress.UserID,
+			progress.GoalID,
+			progress.ChallengeID,
+			progress.Namespace,
+			progress.IsActive,
+		)
+
+		if err != nil {
+			return errors.ErrDatabaseError("insert goal active in transaction", err)
+		}
 	}
 
 	return nil

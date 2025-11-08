@@ -5,6 +5,115 @@ import (
 	"time"
 )
 
+func TestEventSource_IsValid(t *testing.T) {
+	tests := []struct {
+		name   string
+		source EventSource
+		want   bool
+	}{
+		{
+			name:   "login is valid",
+			source: EventSourceLogin,
+			want:   true,
+		},
+		{
+			name:   "statistic is valid",
+			source: EventSourceStatistic,
+			want:   true,
+		},
+		{
+			name:   "invalid source",
+			source: EventSource("invalid"),
+			want:   false,
+		},
+		{
+			name:   "empty source",
+			source: EventSource(""),
+			want:   false,
+		},
+		{
+			name:   "random source",
+			source: EventSource("random"),
+			want:   false,
+		},
+		{
+			name:   "uppercase LOGIN",
+			source: EventSource("LOGIN"),
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.source.IsValid(); got != tt.want {
+				t.Errorf("EventSource.IsValid() = %v, want %v for source %q", got, tt.want, tt.source)
+			}
+		})
+	}
+}
+
+func TestGoalType_IsValid(t *testing.T) {
+	tests := []struct {
+		name     string
+		goalType GoalType
+		want     bool
+	}{
+		{
+			name:     "absolute is valid",
+			goalType: GoalTypeAbsolute,
+			want:     true,
+		},
+		{
+			name:     "increment is valid",
+			goalType: GoalTypeIncrement,
+			want:     true,
+		},
+		{
+			name:     "daily is valid",
+			goalType: GoalTypeDaily,
+			want:     true,
+		},
+		{
+			name:     "invalid type",
+			goalType: GoalType("invalid"),
+			want:     false,
+		},
+		{
+			name:     "empty type",
+			goalType: GoalType(""),
+			want:     false,
+		},
+		{
+			name:     "weekly (not supported)",
+			goalType: GoalType("weekly"),
+			want:     false,
+		},
+		{
+			name:     "streak (not supported)",
+			goalType: GoalType("streak"),
+			want:     false,
+		},
+		{
+			name:     "uppercase ABSOLUTE",
+			goalType: GoalType("ABSOLUTE"),
+			want:     false,
+		},
+		{
+			name:     "mixed case Increment",
+			goalType: GoalType("Increment"),
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.goalType.IsValid(); got != tt.want {
+				t.Errorf("GoalType.IsValid() = %v, want %v for type %q", got, tt.want, tt.goalType)
+			}
+		})
+	}
+}
+
 func TestGoalStatus_IsValid(t *testing.T) {
 	tests := []struct {
 		name   string

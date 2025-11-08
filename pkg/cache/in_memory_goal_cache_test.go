@@ -164,6 +164,38 @@ func TestInMemoryGoalCache_GetAllChallenges(t *testing.T) {
 	}
 }
 
+func TestInMemoryGoalCache_GetAllGoals(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	cfg := createTestConfig()
+	cache := NewInMemoryGoalCache(cfg, "/path/to/config.json", logger)
+
+	goals := cache.GetAllGoals()
+
+	if len(goals) != 3 {
+		t.Fatalf("expected 3 goals, got %d", len(goals))
+	}
+
+	// Verify all goals are present (order not guaranteed since it comes from map)
+	goalIDs := make(map[string]bool)
+	for _, goal := range goals {
+		goalIDs[goal.ID] = true
+	}
+
+	expectedIDs := []string{"goal-1", "goal-2", "goal-3"}
+	for _, expectedID := range expectedIDs {
+		if !goalIDs[expectedID] {
+			t.Errorf("expected goal %q to be in results", expectedID)
+		}
+	}
+
+	// Verify goals have correct challenge references
+	for _, goal := range goals {
+		if goal.ChallengeID == "" {
+			t.Errorf("goal %q has empty challenge_id", goal.ID)
+		}
+	}
+}
+
 func TestInMemoryGoalCache_Reload(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 

@@ -33,9 +33,22 @@ func TestNewConfigFromEnv_AllDefaults(t *testing.T) {
 		"DB_SSLMODE", "DB_MAX_OPEN_CONNS", "DB_MAX_IDLE_CONNS",
 		"DB_CONN_MAX_LIFETIME", "DB_CONN_MAX_IDLE_TIME",
 	}
+
+	// Save original values
+	originalValues := make(map[string]string)
 	for _, key := range envVars {
+		originalValues[key] = os.Getenv(key)
 		testUnsetenv(t, key)
 	}
+
+	// Restore original values after test
+	defer func() {
+		for key, value := range originalValues {
+			if value != "" {
+				testSetenv(t, key, value)
+			}
+		}
+	}()
 
 	cfg := NewConfigFromEnv()
 
@@ -52,6 +65,20 @@ func TestNewConfigFromEnv_AllDefaults(t *testing.T) {
 }
 
 func TestNewConfigFromEnv_CustomValues(t *testing.T) {
+	// Save original values
+	originalValues := map[string]string{
+		"DB_HOST":               os.Getenv("DB_HOST"),
+		"DB_PORT":               os.Getenv("DB_PORT"),
+		"DB_NAME":               os.Getenv("DB_NAME"),
+		"DB_USER":               os.Getenv("DB_USER"),
+		"DB_PASSWORD":           os.Getenv("DB_PASSWORD"),
+		"DB_SSLMODE":            os.Getenv("DB_SSLMODE"),
+		"DB_MAX_OPEN_CONNS":     os.Getenv("DB_MAX_OPEN_CONNS"),
+		"DB_MAX_IDLE_CONNS":     os.Getenv("DB_MAX_IDLE_CONNS"),
+		"DB_CONN_MAX_LIFETIME":  os.Getenv("DB_CONN_MAX_LIFETIME"),
+		"DB_CONN_MAX_IDLE_TIME": os.Getenv("DB_CONN_MAX_IDLE_TIME"),
+	}
+
 	// Set custom environment variables
 	testSetenv(t, "DB_HOST", "db.example.com")
 	testSetenv(t, "DB_PORT", "5433")
@@ -65,17 +92,14 @@ func TestNewConfigFromEnv_CustomValues(t *testing.T) {
 	testSetenv(t, "DB_CONN_MAX_IDLE_TIME", "120")
 
 	defer func() {
-		// Clean up
-		testUnsetenv(t, "DB_HOST")
-		testUnsetenv(t, "DB_PORT")
-		testUnsetenv(t, "DB_NAME")
-		testUnsetenv(t, "DB_USER")
-		testUnsetenv(t, "DB_PASSWORD")
-		testUnsetenv(t, "DB_SSLMODE")
-		testUnsetenv(t, "DB_MAX_OPEN_CONNS")
-		testUnsetenv(t, "DB_MAX_IDLE_CONNS")
-		testUnsetenv(t, "DB_CONN_MAX_LIFETIME")
-		testUnsetenv(t, "DB_CONN_MAX_IDLE_TIME")
+		// Restore original values
+		for key, value := range originalValues {
+			if value != "" {
+				testSetenv(t, key, value)
+			} else {
+				testUnsetenv(t, key)
+			}
+		}
 	}()
 
 	cfg := NewConfigFromEnv()
@@ -93,8 +117,15 @@ func TestNewConfigFromEnv_CustomValues(t *testing.T) {
 }
 
 func TestNewConfigFromEnv_InvalidPort(t *testing.T) {
+	originalValue := os.Getenv("DB_PORT")
 	testSetenv(t, "DB_PORT", "invalid")
-	defer testUnsetenv(t, "DB_PORT")
+	defer func() {
+		if originalValue != "" {
+			testSetenv(t, "DB_PORT", originalValue)
+		} else {
+			testUnsetenv(t, "DB_PORT")
+		}
+	}()
 
 	cfg := NewConfigFromEnv()
 
@@ -103,8 +134,15 @@ func TestNewConfigFromEnv_InvalidPort(t *testing.T) {
 }
 
 func TestNewConfigFromEnv_InvalidInt(t *testing.T) {
+	originalValue := os.Getenv("DB_MAX_OPEN_CONNS")
 	testSetenv(t, "DB_MAX_OPEN_CONNS", "not_a_number")
-	defer testUnsetenv(t, "DB_MAX_OPEN_CONNS")
+	defer func() {
+		if originalValue != "" {
+			testSetenv(t, "DB_MAX_OPEN_CONNS", originalValue)
+		} else {
+			testUnsetenv(t, "DB_MAX_OPEN_CONNS")
+		}
+	}()
 
 	cfg := NewConfigFromEnv()
 
@@ -349,4 +387,224 @@ func TestConfig_ConnectionPoolSettings(t *testing.T) {
 	// Verify pool settings are applied
 	stats := db.Stats()
 	assert.Equal(t, 10, stats.MaxOpenConnections)
+}
+
+func TestConnect_SQLOpenError(t *testing.T) {
+	// Test with invalid driver/connection string format
+	cfg := &Config{
+		Host:            "",
+		Port:            -1, // Invalid port
+		Database:        "",
+		User:            "",
+		Password:        "",
+		SSLMode:         "invalid",
+		MaxOpenConns:    25,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: 300 * time.Second,
+		ConnMaxIdleTime: 300 * time.Second,
+	}
+
+	db, err := Connect(cfg)
+
+	// Should fail to ping with invalid configuration
+	assert.Error(t, err)
+	assert.Nil(t, db)
+}
+
+func TestHealth_WithContext(t *testing.T) {
+	if os.Getenv("DB_HOST") == "" {
+		t.Skip("Skipping integration test: DB_HOST not set")
+	}
+
+	cfg := NewConfigFromEnv()
+	db, err := Connect(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	// Test with proper context
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err = db.PingContext(ctx)
+	assert.NoError(t, err)
+}
+
+func TestHealth_ContextTimeout(t *testing.T) {
+	if os.Getenv("DB_HOST") == "" {
+		t.Skip("Skipping integration test: DB_HOST not set")
+	}
+
+	cfg := NewConfigFromEnv()
+	db, err := Connect(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	// Test with already-expired context
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
+	defer cancel()
+
+	time.Sleep(10 * time.Millisecond) // Ensure context is expired
+
+	err = db.PingContext(ctx)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "context deadline exceeded")
+}
+
+func TestConnect_ConnectionPoolConfiguration(t *testing.T) {
+	if os.Getenv("DB_HOST") == "" {
+		t.Skip("Skipping integration test: DB_HOST not set")
+	}
+
+	// Test various pool configurations
+	tests := []struct {
+		name         string
+		maxOpenConns int
+		maxIdleConns int
+	}{
+		{
+			name:         "standard pool",
+			maxOpenConns: 25,
+			maxIdleConns: 5,
+		},
+		{
+			name:         "small pool",
+			maxOpenConns: 5,
+			maxIdleConns: 2,
+		},
+		{
+			name:         "large pool",
+			maxOpenConns: 100,
+			maxIdleConns: 20,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{
+				Host:            getEnv("DB_HOST", "localhost"),
+				Port:            getEnvAsInt("DB_PORT", 5432),
+				Database:        getEnv("DB_NAME", "postgres"),
+				User:            getEnv("DB_USER", "postgres"),
+				Password:        getEnv("DB_PASSWORD", "test"),
+				SSLMode:         "disable",
+				MaxOpenConns:    tt.maxOpenConns,
+				MaxIdleConns:    tt.maxIdleConns,
+				ConnMaxLifetime: 300 * time.Second,
+				ConnMaxIdleTime: 300 * time.Second,
+			}
+
+			db, err := Connect(cfg)
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			stats := db.Stats()
+			assert.Equal(t, tt.maxOpenConns, stats.MaxOpenConnections)
+
+			// Verify we can execute a query
+			var result int
+			err = db.QueryRow("SELECT 1").Scan(&result)
+			assert.NoError(t, err)
+			assert.Equal(t, 1, result)
+		})
+	}
+}
+
+func TestConnect_SSLModes(t *testing.T) {
+	if os.Getenv("DB_HOST") == "" {
+		t.Skip("Skipping integration test: DB_HOST not set")
+	}
+
+	// Test different SSL modes
+	sslModes := []string{"disable", "allow", "prefer"}
+
+	for _, sslMode := range sslModes {
+		t.Run("sslmode_"+sslMode, func(t *testing.T) {
+			cfg := &Config{
+				Host:            getEnv("DB_HOST", "localhost"),
+				Port:            getEnvAsInt("DB_PORT", 5432),
+				Database:        getEnv("DB_NAME", "postgres"),
+				User:            getEnv("DB_USER", "postgres"),
+				Password:        getEnv("DB_PASSWORD", "test"),
+				SSLMode:         sslMode,
+				MaxOpenConns:    25,
+				MaxIdleConns:    5,
+				ConnMaxLifetime: 300 * time.Second,
+				ConnMaxIdleTime: 300 * time.Second,
+			}
+
+			db, err := Connect(cfg)
+			// Some SSL modes may not work depending on PostgreSQL configuration
+			// We just verify the connection attempt doesn't panic
+			if err != nil {
+				assert.Contains(t, err.Error(), "failed to ping database")
+			} else {
+				defer func() { _ = db.Close() }()
+				// Verify we can ping
+				err = db.Ping()
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestHealth_Concurrency(t *testing.T) {
+	if os.Getenv("DB_HOST") == "" {
+		t.Skip("Skipping integration test: DB_HOST not set")
+	}
+
+	cfg := NewConfigFromEnv()
+	db, err := Connect(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	// Test concurrent health checks
+	const numGoroutines = 10
+	errs := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			errs <- Health(db)
+		}()
+	}
+
+	// Collect results
+	for i := 0; i < numGoroutines; i++ {
+		err := <-errs
+		assert.NoError(t, err)
+	}
+}
+
+func TestConnect_VerifyPoolSettings(t *testing.T) {
+	if os.Getenv("DB_HOST") == "" {
+		t.Skip("Skipping integration test: DB_HOST not set")
+	}
+
+	cfg := &Config{
+		Host:            getEnv("DB_HOST", "localhost"),
+		Port:            getEnvAsInt("DB_PORT", 5432),
+		Database:        getEnv("DB_NAME", "postgres"),
+		User:            getEnv("DB_USER", "postgres"),
+		Password:        getEnv("DB_PASSWORD", "test"),
+		SSLMode:         "disable",
+		MaxOpenConns:    15,
+		MaxIdleConns:    3,
+		ConnMaxLifetime: 120 * time.Second,
+		ConnMaxIdleTime: 60 * time.Second,
+	}
+
+	db, err := Connect(cfg)
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	// Force some connections to be created
+	for i := 0; i < 5; i++ {
+		var result int
+		err = db.QueryRow("SELECT 1").Scan(&result)
+		assert.NoError(t, err)
+	}
+
+	// Verify pool statistics
+	stats := db.Stats()
+	assert.Equal(t, 15, stats.MaxOpenConnections)
+	assert.GreaterOrEqual(t, stats.OpenConnections, 1)
 }
