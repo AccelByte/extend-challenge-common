@@ -342,13 +342,13 @@ func (r *PostgresGoalRepository) incrementProgressRegular(ctx context.Context, u
 	query := `
 		UPDATE user_goal_progress
 		SET
-			progress = progress + $5::INT,
+			progress = progress + $3::INT,
 			status = CASE
-				WHEN progress + $5::INT >= $6::INT THEN 'completed'
+				WHEN progress + $3::INT >= $4::INT THEN 'completed'
 				ELSE 'in_progress'
 			END,
 			completed_at = CASE
-				WHEN progress + $5::INT >= $6::INT AND completed_at IS NULL THEN NOW()
+				WHEN progress + $3::INT >= $4::INT AND completed_at IS NULL THEN NOW()
 				ELSE completed_at
 			END,
 			updated_at = NOW()
@@ -358,7 +358,7 @@ func (r *PostgresGoalRepository) incrementProgressRegular(ctx context.Context, u
 		  AND status != 'claimed'
 	`
 
-	_, err := r.db.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
+	_, err := r.db.ExecContext(ctx, query, userID, goalID, delta, targetValue)
 	if err != nil {
 		return errors.ErrDatabaseError("increment progress (regular)", err)
 	}
@@ -378,21 +378,21 @@ func (r *PostgresGoalRepository) incrementProgressDaily(ctx context.Context, use
 				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
 					THEN progress
 				-- New day: increment by delta
-				ELSE progress + $5::INT
+				ELSE progress + $3::INT
 			END,
 			status = CASE
 				-- Calculate new progress first, then check threshold
 				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
 					-- Same day, progress unchanged
-					CASE WHEN progress >= $6::INT THEN 'completed' ELSE 'in_progress' END
+					CASE WHEN progress >= $4::INT THEN 'completed' ELSE 'in_progress' END
 				ELSE
 					-- New day, check incremented progress
-					CASE WHEN progress + $5::INT >= $6::INT THEN 'completed' ELSE 'in_progress' END
+					CASE WHEN progress + $3::INT >= $4::INT THEN 'completed' ELSE 'in_progress' END
 			END,
 			completed_at = CASE
 				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
 					completed_at  -- Same day, keep existing
-				WHEN progress + $5::INT >= $6::INT AND completed_at IS NULL THEN
+				WHEN progress + $3::INT >= $4::INT AND completed_at IS NULL THEN
 					NOW()  -- New day and just completed
 				ELSE
 					completed_at  -- Keep existing
@@ -404,7 +404,7 @@ func (r *PostgresGoalRepository) incrementProgressDaily(ctx context.Context, use
 		  AND status != 'claimed'
 	`
 
-	_, err := r.db.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
+	_, err := r.db.ExecContext(ctx, query, userID, goalID, delta, targetValue)
 	if err != nil {
 		return errors.ErrDatabaseError("increment progress (daily)", err)
 	}
@@ -422,8 +422,6 @@ func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, inc
 	// Build arrays for UNNEST
 	userIDs := make([]string, len(increments))
 	goalIDs := make([]string, len(increments))
-	challengeIDs := make([]string, len(increments))
-	namespaces := make([]string, len(increments))
 	deltas := make([]int, len(increments))
 	targetValues := make([]int, len(increments))
 	isDailyFlags := make([]bool, len(increments))
@@ -431,8 +429,6 @@ func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, inc
 	for i, inc := range increments {
 		userIDs[i] = inc.UserID
 		goalIDs[i] = inc.GoalID
-		challengeIDs[i] = inc.ChallengeID
-		namespaces[i] = inc.Namespace
 		deltas[i] = inc.Delta
 		targetValues[i] = inc.TargetValue
 		isDailyFlags[i] = inc.IsDailyIncrement
@@ -483,9 +479,9 @@ func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, inc
 			FROM UNNEST(
 				$1::VARCHAR(100)[],  -- user_ids
 				$2::VARCHAR(100)[],  -- goal_ids
-				$5::INT[],           -- deltas
-				$6::INT[],           -- target_values
-				$7::BOOLEAN[]        -- is_daily_increment flags
+				$3::INT[],           -- deltas
+				$4::INT[],           -- target_values
+				$5::BOOLEAN[]        -- is_daily_increment flags
 			) AS t(user_id, goal_id, delta, target_value, is_daily)
 		) AS t
 		WHERE user_goal_progress.user_id = t.user_id
@@ -497,8 +493,6 @@ func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, inc
 	_, err := r.db.ExecContext(ctx, query,
 		pq.Array(userIDs),
 		pq.Array(goalIDs),
-		pq.Array(challengeIDs),
-		pq.Array(namespaces),
 		pq.Array(deltas),
 		pq.Array(targetValues),
 		pq.Array(isDailyFlags),

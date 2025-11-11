@@ -87,6 +87,9 @@ func BenchmarkM3_BatchUpsertCOPY_MixedActiveInactive(b *testing.B) {
 					if err != nil {
 						b.Fatalf("GetProgress failed: %v", err)
 					}
+					if result == nil {
+						continue
+					}
 					if result.IsActive && result.Progress == 10 {
 						activeCount++
 					} else if !result.IsActive && result.Progress == 0 {
@@ -250,7 +253,7 @@ func BenchmarkM3_SingleIncrement_ActiveVsInactive(b *testing.B) {
 		if err != nil {
 			b.Fatalf("GetProgress failed: %v", err)
 		}
-		if result.Progress != 0 {
+		if result != nil && result.Progress != 0 {
 			b.Logf("WARNING: Inactive goal was incremented (progress=%d), should be 0", result.Progress)
 		}
 	})
