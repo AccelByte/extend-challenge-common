@@ -700,8 +700,8 @@ func (r *PostgresGoalRepository) GetUserGoalCount(ctx context.Context, userID st
 func (r *PostgresGoalRepository) GetActiveGoals(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       is_active, assigned_at, expires_at, completed_at, claimed_at,
-		       created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND is_active = true
 		ORDER BY challenge_id, goal_id
@@ -1487,8 +1487,8 @@ func (r *PostgresTxRepository) GetUserGoalCount(ctx context.Context, userID stri
 func (r *PostgresTxRepository) GetActiveGoals(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
-		       is_active, assigned_at, expires_at, completed_at, claimed_at,
-		       created_at, updated_at
+		       completed_at, claimed_at, created_at, updated_at,
+		       is_active, assigned_at, expires_at
 		FROM user_goal_progress
 		WHERE user_id = $1 AND is_active = true
 		ORDER BY challenge_id, goal_id
