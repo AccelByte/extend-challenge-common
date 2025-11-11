@@ -70,7 +70,8 @@ func BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl(b *testing.B) {
 		}
 
 		// Verify after first run only to check assignment control works
-		if i == 0 {
+		// Note: nestif disabled for benchmark verification code to keep readable
+		if i == 0 { //nolint:nestif
 			var activeUpdated, inactiveNotUpdated int
 			for j := 0; j < 1000; j++ {
 				result, err := repo.GetProgress(ctx, fmt.Sprintf("bench-user-%d", j), fmt.Sprintf("bench-goal-%d", j))
@@ -158,7 +159,8 @@ func BenchmarkBatchIncrementProgress_AssignmentControl(b *testing.B) {
 		}
 
 		// Verify after first run only to check assignment control works
-		if i == 0 {
+		// Note: nestif disabled for benchmark verification code to keep readable
+		if i == 0 { //nolint:nestif
 			var activeIncremented, inactiveNotIncremented int
 			expectedActiveProgress := 5 + 3 // Initial 5 + first increment of 3
 			for j := 0; j < 1000; j++ {

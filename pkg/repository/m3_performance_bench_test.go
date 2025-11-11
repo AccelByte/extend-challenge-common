@@ -77,8 +77,9 @@ func BenchmarkM3_BatchUpsertCOPY_MixedActiveInactive(b *testing.B) {
 			b.ReportMetric(msPerOp, "ms/op")
 			b.ReportMetric(rowsPerSec, "rows/sec")
 
-			// Verify (only check  a sample to avoid overhead)
-			if b.N == 1 {
+			// Verify (only check a sample to avoid overhead)
+			// Note: nestif disabled for benchmark verification code to keep readable
+			if b.N == 1 { //nolint:nestif
 				activeCount := 0
 				inactiveCount := 0
 				for i := 0; i < size; i++ {

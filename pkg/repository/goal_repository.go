@@ -133,6 +133,20 @@ type GoalRepository interface {
 	// If row exists, updates is_active and assigned_at (only when activating).
 	// Used by manual activation/deactivation endpoint.
 	UpsertGoalActive(ctx context.Context, progress *domain.UserGoalProgress) error
+
+	// M3 Phase 9: Fast path optimization methods
+
+	// GetUserGoalCount returns the total number of goals for a user (active + inactive).
+	// Used by initialization endpoint's fast path to quickly check if user is initialized.
+	// If count > 0, user has been initialized → use GetActiveGoals() instead of full init.
+	// Performance: < 1ms using idx_user_goal_count index.
+	GetUserGoalCount(ctx context.Context, userID string) (int, error)
+
+	// GetActiveGoals retrieves only active goal progress records for a user.
+	// Returns empty slice if user has no active goals.
+	// Used by initialization endpoint's fast path to avoid querying all 500 goal IDs.
+	// Performance: < 5ms using idx_user_goal_active_only partial index.
+	GetActiveGoals(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error)
 }
 
 // TxRepository represents a transactional repository that supports commit/rollback.

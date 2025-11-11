@@ -298,28 +298,25 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 		return errors.ErrDatabaseError("flush COPY to temp table", err)
 	}
 
-	// Step 5: Merge temp table into main table with ON CONFLICT logic
-	// This maintains the same upsert semantics as BatchUpsertProgress
-	// M3: Only update assigned goals (is_active = true)
+	// Step 5: Merge temp table into main table using UPDATE-only (M3 Phase 9: Lazy Materialization)
+	// Changed from UPSERT to pure UPDATE to prevent row creation for unassigned goals.
+	// Events for unassigned goals become true no-ops (no row exists, UPDATE does nothing).
+	// Only updates existing rows where is_active = true and status != 'claimed'.
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO user_goal_progress (
-			user_id, goal_id, challenge_id, namespace,
-			progress, status, completed_at, updated_at
-		)
-		SELECT
-			user_id, goal_id, challenge_id, namespace,
-			progress, status, completed_at, NOW()
-		FROM temp_user_goal_progress
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			progress = EXCLUDED.progress,
-			status = EXCLUDED.status,
-			completed_at = EXCLUDED.completed_at,
+		UPDATE user_goal_progress
+		SET
+			progress = temp.progress,
+			status = temp.status,
+			completed_at = temp.completed_at,
 			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
+		FROM temp_user_goal_progress AS temp
+		WHERE user_goal_progress.user_id = temp.user_id
+		  AND user_goal_progress.goal_id = temp.goal_id
 		  AND user_goal_progress.is_active = true
+		  AND user_goal_progress.status != 'claimed'
 	`)
 	if err != nil {
-		return errors.ErrDatabaseError("merge temp table into user_goal_progress", err)
+		return errors.ErrDatabaseError("update user_goal_progress from temp table", err)
 	}
 
 	// Step 6: Commit transaction (temp table automatically dropped)
@@ -340,36 +337,25 @@ func (r *PostgresGoalRepository) IncrementProgress(ctx context.Context, userID, 
 }
 
 // incrementProgressRegular handles regular increments (always adds delta)
+// M3 Phase 9: Changed from UPSERT to UPDATE-only for lazy materialization
 func (r *PostgresGoalRepository) incrementProgressRegular(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int) error {
 	query := `
-		INSERT INTO user_goal_progress (
-			user_id,
-			goal_id,
-			challenge_id,
-			namespace,
-			progress,
-			status,
-			completed_at,
-			updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5::INT,
-			CASE WHEN $5::INT >= $6::INT THEN 'completed' ELSE 'in_progress' END,
-			CASE WHEN $5::INT >= $6::INT THEN NOW() ELSE NULL END,
-			NOW()
-		)
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			progress = user_goal_progress.progress + $5::INT,
+		UPDATE user_goal_progress
+		SET
+			progress = progress + $5::INT,
 			status = CASE
-				WHEN user_goal_progress.progress + $5::INT >= $6::INT THEN 'completed'
+				WHEN progress + $5::INT >= $6::INT THEN 'completed'
 				ELSE 'in_progress'
 			END,
 			completed_at = CASE
-				WHEN user_goal_progress.progress + $5::INT >= $6::INT AND user_goal_progress.completed_at IS NULL
-					THEN NOW()
-				ELSE user_goal_progress.completed_at
+				WHEN progress + $5::INT >= $6::INT AND completed_at IS NULL THEN NOW()
+				ELSE completed_at
 			END,
 			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
+		WHERE user_id = $1
+		  AND goal_id = $2
+		  AND is_active = true
+		  AND status != 'claimed'
 	`
 
 	_, err := r.db.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
@@ -382,51 +368,40 @@ func (r *PostgresGoalRepository) incrementProgressRegular(ctx context.Context, u
 
 // incrementProgressDaily handles daily increments (only once per day)
 // Uses timezone-safe date comparison to prevent timezone-related bugs
+// M3 Phase 9: Changed from UPSERT to UPDATE-only for lazy materialization
 func (r *PostgresGoalRepository) incrementProgressDaily(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int) error {
 	query := `
-		INSERT INTO user_goal_progress (
-			user_id,
-			goal_id,
-			challenge_id,
-			namespace,
-			progress,
-			status,
-			completed_at,
-			updated_at
-		) VALUES (
-			$1, $2, $3, $4, 1,  -- Initial progress = 1 for first day
-			CASE WHEN 1 >= $6::INT THEN 'completed' ELSE 'in_progress' END,
-			CASE WHEN 1 >= $6::INT THEN NOW() ELSE NULL END,
-			NOW()
-		)
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
+		UPDATE user_goal_progress
+		SET
 			progress = CASE
 				-- Same day (UTC): don't increment
-				WHEN DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
-					THEN user_goal_progress.progress
+				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
+					THEN progress
 				-- New day: increment by delta
-				ELSE user_goal_progress.progress + $5::INT
+				ELSE progress + $5::INT
 			END,
 			status = CASE
 				-- Calculate new progress first, then check threshold
-				WHEN DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
+				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
 					-- Same day, progress unchanged
-					CASE WHEN user_goal_progress.progress >= $6::INT THEN 'completed' ELSE 'in_progress' END
+					CASE WHEN progress >= $6::INT THEN 'completed' ELSE 'in_progress' END
 				ELSE
 					-- New day, check incremented progress
-					CASE WHEN user_goal_progress.progress + $5::INT >= $6::INT THEN 'completed' ELSE 'in_progress' END
+					CASE WHEN progress + $5::INT >= $6::INT THEN 'completed' ELSE 'in_progress' END
 			END,
 			completed_at = CASE
-				WHEN DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					user_goal_progress.completed_at  -- Same day, keep existing
-				WHEN user_goal_progress.progress + $5::INT >= $6::INT AND user_goal_progress.completed_at IS NULL THEN
+				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
+					completed_at  -- Same day, keep existing
+				WHEN progress + $5::INT >= $6::INT AND completed_at IS NULL THEN
 					NOW()  -- New day and just completed
 				ELSE
-					user_goal_progress.completed_at  -- Keep existing
+					completed_at  -- Keep existing
 			END,
 			updated_at = NOW()  -- Always update timestamp (for daily tracking)
-		WHERE user_goal_progress.status != 'claimed'
-		  AND user_goal_progress.is_active = true
+		WHERE user_id = $1
+		  AND goal_id = $2
+		  AND is_active = true
+		  AND status != 'claimed'
 	`
 
 	_, err := r.db.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
@@ -465,93 +440,58 @@ func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, inc
 
 	// Complex query using UNNEST for batch operations with daily increment support
 	// Uses timezone-safe date comparison (AT TIME ZONE 'UTC') to prevent timezone bugs
+	// M3 Phase 9: Changed from UPSERT to UPDATE-only for lazy materialization
 	query := `
-		INSERT INTO user_goal_progress (
-			user_id,
-			goal_id,
-			challenge_id,
-			namespace,
-			progress,
-			status,
-			completed_at,
-			updated_at
-		)
-		SELECT
-			t.user_id,
-			t.goal_id,
-			t.challenge_id,
-			t.namespace,
-			t.delta,  -- Initial progress for INSERT
-			initial.status,
-			initial.completed_at,
-			NOW()
-		FROM UNNEST(
-			$1::VARCHAR(100)[],  -- user_ids
-			$2::VARCHAR(100)[],  -- goal_ids
-			$3::VARCHAR(100)[],  -- challenge_ids
-			$4::VARCHAR(100)[],  -- namespaces
-			$5::INT[],           -- deltas (initial progress for INSERT)
-			$6::INT[],           -- target_values
-			$7::BOOLEAN[]        -- is_daily_increment flags
-		) AS t(user_id, goal_id, challenge_id, namespace, delta, target_value, is_daily)
-		-- Determine initial status and completed_at for INSERT (first-time progress)
-		CROSS JOIN LATERAL (
-			SELECT
-				CASE WHEN t.delta >= t.target_value THEN 'completed' ELSE 'in_progress' END as status,
-				CASE WHEN t.delta >= t.target_value THEN NOW() ELSE NULL END as completed_at
-		) AS initial
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
+		UPDATE user_goal_progress
+		SET
 			progress = CASE
 				-- Daily increment: check if same day (UTC)
-				WHEN (SELECT is_daily FROM UNNEST($7::BOOLEAN[], $2::VARCHAR(100)[]) AS u(is_daily, gid)
-				      WHERE u.gid = user_goal_progress.goal_id LIMIT 1) = true
+				WHEN t.is_daily = true
 				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
 					THEN user_goal_progress.progress  -- Same day, no increment
 				ELSE
-					user_goal_progress.progress + (
-						SELECT delta FROM UNNEST($5::INT[], $2::VARCHAR(100)[]) AS u(delta, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					)  -- Different day or regular increment
+					user_goal_progress.progress + t.delta  -- Different day or regular increment
 			END,
 			status = CASE
 				-- Calculate based on new progress value
-				WHEN (SELECT is_daily FROM UNNEST($7::BOOLEAN[], $2::VARCHAR(100)[]) AS u(is_daily, gid)
-				      WHERE u.gid = user_goal_progress.goal_id LIMIT 1) = true
+				WHEN t.is_daily = true
 				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
 					-- Same day: status based on current progress
-					CASE WHEN user_goal_progress.progress >= (
-						SELECT target_value FROM UNNEST($6::INT[], $2::VARCHAR(100)[]) AS u(target_value, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					) THEN 'completed' ELSE 'in_progress' END
+					CASE WHEN user_goal_progress.progress >= t.target_value THEN 'completed' ELSE 'in_progress' END
 				ELSE
 					-- New day or regular: status based on incremented progress
-					CASE WHEN user_goal_progress.progress + (
-						SELECT delta FROM UNNEST($5::INT[], $2::VARCHAR(100)[]) AS u(delta, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					) >= (
-						SELECT target_value FROM UNNEST($6::INT[], $2::VARCHAR(100)[]) AS u(target_value, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					) THEN 'completed' ELSE 'in_progress' END
+					CASE WHEN user_goal_progress.progress + t.delta >= t.target_value THEN 'completed' ELSE 'in_progress' END
 			END,
 			completed_at = CASE
-				WHEN (SELECT is_daily FROM UNNEST($7::BOOLEAN[], $2::VARCHAR(100)[]) AS u(is_daily, gid)
-				      WHERE u.gid = user_goal_progress.goal_id LIMIT 1) = true
+				WHEN t.is_daily = true
 				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
 					user_goal_progress.completed_at  -- Same day, keep existing
-				WHEN user_goal_progress.progress + (
-					SELECT delta FROM UNNEST($5::INT[], $2::VARCHAR(100)[]) AS u(delta, gid)
-					WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-				) >= (
-					SELECT target_value FROM UNNEST($6::INT[], $2::VARCHAR(100)[]) AS u(target_value, gid)
-					WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-				) AND user_goal_progress.completed_at IS NULL THEN
+				WHEN user_goal_progress.progress + t.delta >= t.target_value
+				     AND user_goal_progress.completed_at IS NULL THEN
 					NOW()  -- Just completed
 				ELSE
 					user_goal_progress.completed_at  -- Keep existing
 			END,
 			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
+		FROM (
+			SELECT
+				user_id,
+				goal_id,
+				delta,
+				target_value,
+				is_daily
+			FROM UNNEST(
+				$1::VARCHAR(100)[],  -- user_ids
+				$2::VARCHAR(100)[],  -- goal_ids
+				$5::INT[],           -- deltas
+				$6::INT[],           -- target_values
+				$7::BOOLEAN[]        -- is_daily_increment flags
+			) AS t(user_id, goal_id, delta, target_value, is_daily)
+		) AS t
+		WHERE user_goal_progress.user_id = t.user_id
+		  AND user_goal_progress.goal_id = t.goal_id
 		  AND user_goal_progress.is_active = true
+		  AND user_goal_progress.status != 'claimed'
 	`
 
 	_, err := r.db.ExecContext(ctx, query,
@@ -739,6 +679,43 @@ func (r *PostgresGoalRepository) UpsertGoalActive(ctx context.Context, progress 
 	}
 
 	return nil
+}
+
+// M3 Phase 9: Fast path optimization methods
+
+// GetUserGoalCount returns the total number of goals for a user (active + inactive).
+func (r *PostgresGoalRepository) GetUserGoalCount(ctx context.Context, userID string) (int, error) {
+	query := `SELECT COUNT(*) FROM user_goal_progress WHERE user_id = $1`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query, userID).Scan(&count)
+	if err != nil {
+		return 0, errors.ErrDatabaseError("get user goal count", err)
+	}
+
+	return count, nil
+}
+
+// GetActiveGoals retrieves only active goal progress records for a user.
+func (r *PostgresGoalRepository) GetActiveGoals(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
+	query := `
+		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
+		       is_active, assigned_at, expires_at, completed_at, claimed_at,
+		       created_at, updated_at
+		FROM user_goal_progress
+		WHERE user_id = $1 AND is_active = true
+		ORDER BY challenge_id, goal_id
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, errors.ErrDatabaseError("get active goals", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	return r.scanProgressRows(rows)
 }
 
 // BeginTx starts a database transaction and returns a transactional repository.
@@ -1489,6 +1466,43 @@ func (r *PostgresTxRepository) UpsertGoalActive(ctx context.Context, progress *d
 	}
 
 	return nil
+}
+
+// M3 Phase 9: Fast path optimization methods
+
+// GetUserGoalCount returns the total number of goals for a user (active + inactive) within a transaction.
+func (r *PostgresTxRepository) GetUserGoalCount(ctx context.Context, userID string) (int, error) {
+	query := `SELECT COUNT(*) FROM user_goal_progress WHERE user_id = $1`
+
+	var count int
+	err := r.tx.QueryRowContext(ctx, query, userID).Scan(&count)
+	if err != nil {
+		return 0, errors.ErrDatabaseError("get user goal count in transaction", err)
+	}
+
+	return count, nil
+}
+
+// GetActiveGoals retrieves only active goal progress records for a user within a transaction.
+func (r *PostgresTxRepository) GetActiveGoals(ctx context.Context, userID string) ([]*domain.UserGoalProgress, error) {
+	query := `
+		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
+		       is_active, assigned_at, expires_at, completed_at, claimed_at,
+		       created_at, updated_at
+		FROM user_goal_progress
+		WHERE user_id = $1 AND is_active = true
+		ORDER BY challenge_id, goal_id
+	`
+
+	rows, err := r.tx.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, errors.ErrDatabaseError("get active goals in transaction", err)
+	}
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	return r.parent.scanProgressRows(rows)
 }
 
 // BeginTx is not supported within a transaction.
