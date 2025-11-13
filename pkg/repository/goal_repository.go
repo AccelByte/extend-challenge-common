@@ -123,10 +123,46 @@ type GoalRepository interface {
 	// Used by initialization endpoint to check which default goals already exist.
 	GetGoalsByIDs(ctx context.Context, userID string, goalIDs []string) ([]*domain.UserGoalProgress, error)
 
-	// BulkInsert creates multiple goal progress records in a single query.
+	// BulkInsert creates multiple goal progress records in a single parameterized INSERT query.
 	// Uses INSERT ... ON CONFLICT DO NOTHING for idempotency.
 	// Used by initialization endpoint to create default goal assignments.
+	//
+	// ✅ RECOMMENDED FOR SMALL BATCHES (< 1000 records)
+	//
+	// Benchmark Results (2025-11-11):
+	//   - 10 records:  2.20ms (2.3x faster than COPY protocol)
+	//   - 100 records: 8.63ms (1.2x faster than COPY protocol)
+	//
+	// This method is FASTER than BulkInsertWithCOPY for small batches due to lower
+	// overhead (no temp table creation, no transaction wrapper).
+	//
+	// Use this for:
+	//   ✅ Initialize endpoint (10-20 records)
+	//   ✅ Event-driven updates (1-10 records)
+	//   ✅ Any batch < 1000 records
+	//
+	// For batches >= 1000 records, consider BulkInsertWithCOPY.
 	BulkInsert(ctx context.Context, progresses []*domain.UserGoalProgress) error
+
+	// BulkInsertWithCOPY creates multiple goal progress records using PostgreSQL COPY protocol.
+	//
+	// ⚠️  WARNING: DO NOT USE FOR SMALL BATCHES (< 1000 records)
+	//
+	// Benchmark Results (2025-11-11):
+	//   - 10 records:  COPY is 2.3x SLOWER (5.10ms vs 2.20ms) - use BulkInsert() instead
+	//   - 100 records: COPY is 1.2x SLOWER (10.43ms vs 8.63ms) - use BulkInsert() instead
+	//   - 1000+ records: COPY starts showing benefits (~40ms for 1000 records)
+	//
+	// USAGE GUIDELINES:
+	//   ✅ Bulk data migrations (1000+ records)
+	//   ✅ Background jobs processing large batches
+	//   ✅ Admin operations importing data
+	//   ❌ Initialize endpoint (10-20 records) - use BulkInsert() instead
+	//   ❌ Event-driven updates (1-10 records) - use single inserts
+	//
+	// Implementation uses COPY FROM STDIN to bulk load data into a temporary table,
+	// then inserts from temp table to main table with ON CONFLICT DO NOTHING.
+	BulkInsertWithCOPY(ctx context.Context, progresses []*domain.UserGoalProgress) error
 
 	// UpsertGoalActive creates or updates a goal's is_active status.
 	// If row doesn't exist, creates it with is_active and assigned_at fields.

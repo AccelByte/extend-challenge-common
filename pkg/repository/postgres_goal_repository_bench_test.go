@@ -391,3 +391,179 @@ func cleanupTestDBForBench(b *testing.B, db *sql.DB) {
 
 	_ = db.Close()
 }
+
+// BenchmarkBulkInsert_OLD benchmarks the old BulkInsert implementation (parameterized INSERT).
+// This serves as a baseline for comparison with the COPY protocol implementation.
+func BenchmarkBulkInsert_OLD(b *testing.B) {
+	if testing.Short() {
+		b.Skip("Skipping benchmark in short mode")
+	}
+
+	db := setupTestDBForBench(b)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDBForBench(b, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	// Test with 10 records (typical initialization use case)
+	b.Run("10_records", func(b *testing.B) {
+		records := make([]*domain.UserGoalProgress, 10)
+		for i := 0; i < 10; i++ {
+			now := time.Now()
+			records[i] = &domain.UserGoalProgress{
+				UserID:      fmt.Sprintf("old-user-%d", i),
+				GoalID:      fmt.Sprintf("old-goal-%d", i),
+				ChallengeID: "old-challenge",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
+				IsActive:    true,
+				AssignedAt:  &now,
+			}
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Update user IDs to avoid conflicts between iterations
+			for j := 0; j < 10; j++ {
+				records[j].UserID = fmt.Sprintf("old-user-%d-%d", j, i)
+			}
+
+			err := repo.BulkInsert(ctx, records)
+			if err != nil {
+				b.Fatalf("BulkInsert failed: %v", err)
+			}
+		}
+		b.StopTimer()
+
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
+	})
+
+	// Clean between subtests
+	_, _ = db.Exec("TRUNCATE TABLE user_goal_progress")
+
+	// Test with 100 records (stress test)
+	b.Run("100_records", func(b *testing.B) {
+		records := make([]*domain.UserGoalProgress, 100)
+		for i := 0; i < 100; i++ {
+			now := time.Now()
+			records[i] = &domain.UserGoalProgress{
+				UserID:      fmt.Sprintf("old-user-%d", i),
+				GoalID:      fmt.Sprintf("old-goal-%d", i),
+				ChallengeID: "old-challenge",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
+				IsActive:    true,
+				AssignedAt:  &now,
+			}
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Update user IDs to avoid conflicts between iterations
+			for j := 0; j < 100; j++ {
+				records[j].UserID = fmt.Sprintf("old-user-%d-%d", j, i)
+			}
+
+			err := repo.BulkInsert(ctx, records)
+			if err != nil {
+				b.Fatalf("BulkInsert failed: %v", err)
+			}
+		}
+		b.StopTimer()
+
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
+	})
+}
+
+// BenchmarkBulkInsertWithCOPY_NEW benchmarks the new COPY protocol implementation.
+// Expected to be 3-5x faster than BulkInsert (old).
+func BenchmarkBulkInsertWithCOPY_NEW(b *testing.B) {
+	if testing.Short() {
+		b.Skip("Skipping benchmark in short mode")
+	}
+
+	db := setupTestDBForBench(b)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDBForBench(b, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	// Test with 10 records (typical initialization use case)
+	b.Run("10_records", func(b *testing.B) {
+		records := make([]*domain.UserGoalProgress, 10)
+		for i := 0; i < 10; i++ {
+			now := time.Now()
+			records[i] = &domain.UserGoalProgress{
+				UserID:      fmt.Sprintf("new-user-%d", i),
+				GoalID:      fmt.Sprintf("new-goal-%d", i),
+				ChallengeID: "new-challenge",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
+				IsActive:    true,
+				AssignedAt:  &now,
+			}
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Update user IDs to avoid conflicts between iterations
+			for j := 0; j < 10; j++ {
+				records[j].UserID = fmt.Sprintf("new-user-%d-%d", j, i)
+			}
+
+			err := repo.BulkInsertWithCOPY(ctx, records)
+			if err != nil {
+				b.Fatalf("BulkInsertWithCOPY failed: %v", err)
+			}
+		}
+		b.StopTimer()
+
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
+	})
+
+	// Clean between subtests
+	_, _ = db.Exec("TRUNCATE TABLE user_goal_progress")
+
+	// Test with 100 records (stress test)
+	b.Run("100_records", func(b *testing.B) {
+		records := make([]*domain.UserGoalProgress, 100)
+		for i := 0; i < 100; i++ {
+			now := time.Now()
+			records[i] = &domain.UserGoalProgress{
+				UserID:      fmt.Sprintf("new-user-%d", i),
+				GoalID:      fmt.Sprintf("new-goal-%d", i),
+				ChallengeID: "new-challenge",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
+				IsActive:    true,
+				AssignedAt:  &now,
+			}
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			// Update user IDs to avoid conflicts between iterations
+			for j := 0; j < 100; j++ {
+				records[j].UserID = fmt.Sprintf("new-user-%d-%d", j, i)
+			}
+
+			err := repo.BulkInsertWithCOPY(ctx, records)
+			if err != nil {
+				b.Fatalf("BulkInsertWithCOPY failed: %v", err)
+			}
+		}
+		b.StopTimer()
+
+		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
+	})
+}
