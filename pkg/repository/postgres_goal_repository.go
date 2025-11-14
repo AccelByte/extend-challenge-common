@@ -164,6 +164,9 @@ func (r *PostgresGoalRepository) UpsertProgress(ctx context.Context, progress *d
 //
 // DEPRECATED: Use BatchUpsertProgressWithCOPY for better performance (5-10x faster).
 // This method is kept for backwards compatibility and testing.
+//
+// M3: Added is_active = true check in WHERE clause for assignment control.
+// Only updates assigned goals (is_active = true), skipping unassigned goals.
 func (r *PostgresGoalRepository) BatchUpsertProgress(ctx context.Context, updates []*domain.UserGoalProgress) error {
 	if len(updates) == 0 {
 		return nil
@@ -209,6 +212,7 @@ func (r *PostgresGoalRepository) BatchUpsertProgress(ctx context.Context, update
 			completed_at = EXCLUDED.completed_at,
 			updated_at = NOW()
 		WHERE user_goal_progress.status != 'claimed'
+		  AND user_goal_progress.is_active = true
 	`, strings.Join(valueStrings, ","))
 
 	_, err := r.db.ExecContext(ctx, query, valueArgs...)

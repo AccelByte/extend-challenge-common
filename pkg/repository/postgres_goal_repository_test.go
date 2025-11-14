@@ -226,7 +226,45 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 	repo := NewPostgresGoalRepository(db)
 	ctx := context.Background()
 
-	t.Run("batch insert multiple progress records", func(t *testing.T) {
+	t.Run("batch update multiple active progress records", func(t *testing.T) {
+		// M3: BatchUpsertProgress now requires rows to exist (UPDATE-only for lazy materialization)
+		// Create initial rows with is_active = true using UpsertProgress
+		initial := []*domain.UserGoalProgress{
+			{
+				UserID:      "user1",
+				GoalID:      "goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+			},
+			{
+				UserID:      "user1",
+				GoalID:      "goal2",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+			},
+			{
+				UserID:      "user2",
+				GoalID:      "goal1",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+			},
+		}
+		for _, p := range initial {
+			if err := repo.UpsertProgress(ctx, p); err != nil {
+				t.Fatalf("UpsertProgress failed: %v", err)
+			}
+		}
+
+		// Now update via BatchUpsertProgress
 		updates := []*domain.UserGoalProgress{
 			{
 				UserID:      "user1",
@@ -259,25 +297,25 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 			t.Fatalf("BatchUpsertProgress failed: %v", err)
 		}
 
-		// Verify all records were inserted
+		// Verify all records were updated
 		progress1, _ := repo.GetProgress(ctx, "user1", "goal1")
 		if progress1 == nil || progress1.Progress != 5 {
-			t.Error("user1/goal1 not inserted correctly")
+			t.Error("user1/goal1 not updated correctly")
 		}
 
 		progress2, _ := repo.GetProgress(ctx, "user1", "goal2")
 		if progress2 == nil || progress2.Progress != 10 {
-			t.Error("user1/goal2 not inserted correctly")
+			t.Error("user1/goal2 not updated correctly")
 		}
 
 		progress3, _ := repo.GetProgress(ctx, "user2", "goal1")
 		if progress3 == nil || progress3.Progress != 3 {
-			t.Error("user2/goal1 not inserted correctly")
+			t.Error("user2/goal1 not updated correctly")
 		}
 	})
 
-	t.Run("batch update existing records", func(t *testing.T) {
-		// Insert initial records
+	t.Run("batch update existing active records only", func(t *testing.T) {
+		// Insert initial active records
 		initial := []*domain.UserGoalProgress{
 			{
 				UserID:      "user3",
@@ -286,6 +324,7 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 				Namespace:   "test",
 				Progress:    1,
 				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
 			},
 			{
 				UserID:      "user3",
@@ -294,11 +333,13 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 				Namespace:   "test",
 				Progress:    2,
 				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
 			},
 		}
-		err := repo.BatchUpsertProgress(ctx, initial)
-		if err != nil {
-			t.Fatalf("Initial BatchUpsertProgress failed: %v", err)
+		for _, p := range initial {
+			if err := repo.UpsertProgress(ctx, p); err != nil {
+				t.Fatalf("UpsertProgress failed: %v", err)
+			}
 		}
 
 		// Update records
@@ -320,7 +361,7 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 				Status:      domain.GoalStatusCompleted,
 			},
 		}
-		err = repo.BatchUpsertProgress(ctx, updates)
+		err := repo.BatchUpsertProgress(ctx, updates)
 		if err != nil {
 			t.Fatalf("Update BatchUpsertProgress failed: %v", err)
 		}
@@ -334,6 +375,47 @@ func TestPostgresGoalRepository_BatchUpsertProgress(t *testing.T) {
 		progress2, _ := repo.GetProgress(ctx, "user3", "goal2")
 		if progress2.Progress != 10 {
 			t.Errorf("user3/goal2 progress = %d, want 10", progress2.Progress)
+		}
+	})
+
+	t.Run("skips updates for inactive goals (M3)", func(t *testing.T) {
+		// Create inactive goal
+		inactive := &domain.UserGoalProgress{
+			UserID:      "user4",
+			GoalID:      "inactive_goal",
+			ChallengeID: "challenge1",
+			Namespace:   "test",
+			Progress:    0,
+			Status:      domain.GoalStatusInProgress,
+			IsActive:    false, // Inactive goal
+		}
+		if err := repo.UpsertProgress(ctx, inactive); err != nil {
+			t.Fatalf("UpsertProgress failed: %v", err)
+		}
+
+		// Try to update inactive goal via BatchUpsertProgress
+		updates := []*domain.UserGoalProgress{
+			{
+				UserID:      "user4",
+				GoalID:      "inactive_goal",
+				ChallengeID: "challenge1",
+				Namespace:   "test",
+				Progress:    100, // Should NOT be applied
+				Status:      domain.GoalStatusCompleted,
+			},
+		}
+		err := repo.BatchUpsertProgress(ctx, updates)
+		if err != nil {
+			t.Fatalf("BatchUpsertProgress failed: %v", err)
+		}
+
+		// Verify inactive goal was NOT updated (progress should still be 0)
+		progress, _ := repo.GetProgress(ctx, "user4", "inactive_goal")
+		if progress.Progress != 0 {
+			t.Errorf("inactive goal was updated (progress = %d), want 0 (no update)", progress.Progress)
+		}
+		if progress.Status != domain.GoalStatusInProgress {
+			t.Errorf("inactive goal status changed to %s, want in_progress", progress.Status)
 		}
 	})
 
