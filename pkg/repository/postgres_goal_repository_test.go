@@ -18,7 +18,7 @@ import (
 // Run with: docker run -d --name test-postgres -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:15
 // Or use docker-compose with a test database
 
-const testDSN = "postgres://postgres:test@localhost:5432/postgres?sslmode=disable"
+const testDSN = "postgres://postgres:test@localhost:5433/postgres?sslmode=disable"
 
 // setupTestDB creates a test database connection and applies schema.
 func setupTestDB(t *testing.T) *sql.DB {
@@ -5193,6 +5193,428 @@ func TestPostgresTxRepository_GetActiveGoals(t *testing.T) {
 		}
 		if len(finalGoals) != 0 {
 			t.Errorf("Expected 0 goals after rollback, got %d", len(finalGoals))
+		}
+	})
+}
+
+// M4 Tests: BatchUpsertGoalActive
+
+func TestPostgresGoalRepository_BatchUpsertGoalActive(t *testing.T) {
+	db := setupTestDB(t)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDB(t, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	t.Run("activates multiple new goals in single operation", func(t *testing.T) {
+		// Setup: No existing records
+		now := time.Now()
+		progresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-1",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-1",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-1",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		// Execute: BatchUpsertGoalActive
+		start := time.Now()
+		err := repo.BatchUpsertGoalActive(ctx, progresses)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Verify: All 3 goals are active
+		result, err := repo.GetUserProgress(ctx, "batch-user-1", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(result) != 3 {
+			t.Errorf("Expected 3 records, got %d", len(result))
+		}
+
+		for _, p := range result {
+			if !p.IsActive {
+				t.Errorf("Goal %s should be active", p.GoalID)
+			}
+			if p.Status != domain.GoalStatusNotStarted {
+				t.Errorf("Goal %s should have status 'not_started', got %s", p.GoalID, p.Status)
+			}
+			if p.AssignedAt == nil {
+				t.Errorf("Goal %s should have assigned_at set", p.GoalID)
+			}
+		}
+
+		// Verify: Performance < 20ms
+		if elapsed > 20*time.Millisecond {
+			t.Logf("Warning: BatchUpsertGoalActive(3) took %v (expected < 20ms)", elapsed)
+		}
+	})
+
+	t.Run("updates existing inactive goals to active", func(t *testing.T) {
+		// Setup: Create 3 inactive goals
+		now := time.Now()
+		initialProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-2",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    5,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+			{
+				UserID:      "batch-user-2",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+			{
+				UserID:      "batch-user-2",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+		}
+
+		err := repo.BulkInsert(ctx, initialProgresses)
+		if err != nil {
+			t.Fatalf("BulkInsert failed: %v", err)
+		}
+
+		// Execute: BatchUpsertGoalActive to activate them
+		activateProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-2",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-2",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-2",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		err = repo.BatchUpsertGoalActive(ctx, activateProgresses)
+		if err != nil {
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Verify: All goals are now active, progress preserved
+		result, err := repo.GetUserProgress(ctx, "batch-user-2", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(result) != 3 {
+			t.Errorf("Expected 3 records, got %d", len(result))
+		}
+
+		for _, p := range result {
+			if !p.IsActive {
+				t.Errorf("Goal %s should be active", p.GoalID)
+			}
+			if p.AssignedAt == nil {
+				t.Errorf("Goal %s should have assigned_at set", p.GoalID)
+			}
+
+			// Verify progress is preserved
+			switch p.GoalID {
+			case "goal-1":
+				if p.Progress != 5 {
+					t.Errorf("Goal goal-1 should have progress 5, got %d", p.Progress)
+				}
+			case "goal-2":
+				if p.Progress != 10 {
+					t.Errorf("Goal goal-2 should have progress 10, got %d", p.Progress)
+				}
+			case "goal-3":
+				if p.Progress != 0 {
+					t.Errorf("Goal goal-3 should have progress 0, got %d", p.Progress)
+				}
+			}
+		}
+	})
+
+	t.Run("handles mixed existing and new goals", func(t *testing.T) {
+		// Setup: Create 2 existing goals (1 active, 1 inactive)
+		now := time.Now()
+		initialProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-3",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    5,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-3",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+		}
+
+		err := repo.BulkInsert(ctx, initialProgresses)
+		if err != nil {
+			t.Fatalf("BulkInsert failed: %v", err)
+		}
+
+		// Execute: BatchUpsertGoalActive with 3 goals (2 existing + 1 new)
+		activateProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-3",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-3",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-3",
+				GoalID:      "goal-3", // NEW
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		err = repo.BatchUpsertGoalActive(ctx, activateProgresses)
+		if err != nil {
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Verify: All 3 goals exist and are active
+		result, err := repo.GetUserProgress(ctx, "batch-user-3", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(result) != 3 {
+			t.Errorf("Expected 3 records, got %d", len(result))
+		}
+
+		for _, p := range result {
+			if !p.IsActive {
+				t.Errorf("Goal %s should be active", p.GoalID)
+			}
+		}
+	})
+
+	t.Run("handles empty slice without error", func(t *testing.T) {
+		// Execute: BatchUpsertGoalActive([])
+		err := repo.BatchUpsertGoalActive(ctx, []*domain.UserGoalProgress{})
+		if err != nil {
+			t.Fatalf("BatchUpsertGoalActive with empty slice should not error, got: %v", err)
+		}
+	})
+
+	t.Run("performance: 10 goals < 20ms", func(t *testing.T) {
+		// Setup: 10 goals
+		now := time.Now()
+		progresses := make([]*domain.UserGoalProgress, 10)
+		for i := 0; i < 10; i++ {
+			progresses[i] = &domain.UserGoalProgress{
+				UserID:      "batch-perf-user",
+				GoalID:      fmt.Sprintf("goal-%d", i),
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			}
+		}
+
+		// Execute: BatchUpsertGoalActive
+		start := time.Now()
+		err := repo.BatchUpsertGoalActive(ctx, progresses)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Verify: Performance < 20ms
+		if elapsed > 20*time.Millisecond {
+			t.Errorf("BatchUpsertGoalActive(10) took %v, expected < 20ms", elapsed)
+		} else {
+			t.Logf("BatchUpsertGoalActive(10) took %v ✓", elapsed)
+		}
+	})
+}
+
+func TestPostgresTxRepository_BatchUpsertGoalActive(t *testing.T) {
+	db := setupTestDB(t)
+	if db == nil {
+		return
+	}
+	defer cleanupTestDB(t, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+
+	t.Run("activates goals within transaction", func(t *testing.T) {
+		// Begin transaction
+		tx, err := repo.BeginTx(ctx)
+		if err != nil {
+			t.Fatalf("BeginTx failed: %v", err)
+		}
+
+		// Execute: BatchUpsertGoalActive in transaction
+		now := time.Now()
+		progresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "tx-batch-user",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "tx-batch-user",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		err = tx.BatchUpsertGoalActive(ctx, progresses)
+		if err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Commit
+		err = tx.Commit()
+		if err != nil {
+			t.Fatalf("Commit failed: %v", err)
+		}
+
+		// Verify: Goals are active
+		result, err := repo.GetUserProgress(ctx, "tx-batch-user", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(result) != 2 {
+			t.Errorf("Expected 2 records, got %d", len(result))
+		}
+
+		for _, p := range result {
+			if !p.IsActive {
+				t.Errorf("Goal %s should be active", p.GoalID)
+			}
+		}
+	})
+
+	t.Run("rollback undoes batch activation", func(t *testing.T) {
+		// Begin transaction
+		tx, err := repo.BeginTx(ctx)
+		if err != nil {
+			t.Fatalf("BeginTx failed: %v", err)
+		}
+
+		// Execute: BatchUpsertGoalActive in transaction
+		now := time.Now()
+		progresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "tx-rollback-user",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		err = tx.BatchUpsertGoalActive(ctx, progresses)
+		if err != nil {
+			_ = tx.Rollback()
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Rollback
+		err = tx.Rollback()
+		if err != nil {
+			t.Fatalf("Rollback failed: %v", err)
+		}
+
+		// Verify: No goals exist
+		result, err := repo.GetUserProgress(ctx, "tx-rollback-user", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(result) != 0 {
+			t.Errorf("Expected 0 records after rollback, got %d", len(result))
 		}
 	})
 }
