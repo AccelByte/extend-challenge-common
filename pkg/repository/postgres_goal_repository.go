@@ -818,12 +818,15 @@ func (r *PostgresGoalRepository) UpsertGoalActive(ctx context.Context, progress 
 	return nil
 }
 
-// BatchUpsertGoalActive activates multiple goals in a single database operation (M4).
+// BatchUpsertGoalActive updates is_active status for multiple goals in a single database operation (M4).
 // This is a performance optimization for batch and random goal selection features.
 //
-// Implementation uses 2 SQL queries instead of N queries:
-// 1. UPDATE existing rows: SET is_active=true WHERE goal_id IN (...)
-// 2. INSERT missing rows: INSERT ... ON CONFLICT DO NOTHING
+// Supports both activation (is_active=true) and deactivation (is_active=false) through the same method.
+// This flexibility is required for M4's replace mode, where existing goals are deactivated before selecting new ones.
+//
+// Implementation uses UNNEST to map each goal to its specific is_active value:
+// 1. UPDATE existing rows: SET is_active = data.is_active FROM (UNNEST(goal_ids, is_active_vals))
+// 2. INSERT missing rows: INSERT ... ON CONFLICT DO UPDATE SET is_active = EXCLUDED.is_active
 //
 // Performance: ~10ms for 10 goals (vs ~20-50ms with individual UpsertGoalActive loop)
 func (r *PostgresGoalRepository) BatchUpsertGoalActive(ctx context.Context, progresses []*domain.UserGoalProgress) error {
@@ -831,27 +834,30 @@ func (r *PostgresGoalRepository) BatchUpsertGoalActive(ctx context.Context, prog
 		return nil
 	}
 
-	// Extract goal IDs and build a map for lookups
+	// Extract goal IDs and is_active values
 	goalIDs := make([]string, len(progresses))
-	progressMap := make(map[string]*domain.UserGoalProgress)
+	isActiveVals := make([]bool, len(progresses))
 	userID := progresses[0].UserID // All progresses should have the same user_id
 
 	for i, p := range progresses {
 		goalIDs[i] = p.GoalID
-		progressMap[p.GoalID] = p
+		isActiveVals[i] = p.IsActive
 	}
 
-	// Step 1: Batch UPDATE existing rows
+	// Step 1: Batch UPDATE existing rows using UNNEST to map each goal to its is_active value
 	updateQuery := `
 		UPDATE user_goal_progress SET
-			is_active = true,
-			assigned_at = NOW(),
+			is_active = data.is_active,
+			assigned_at = CASE WHEN data.is_active THEN NOW() ELSE NULL END,
 			updated_at = NOW()
-		WHERE user_id = $1
-		  AND goal_id = ANY($2)
+		FROM (
+			SELECT UNNEST($2::text[]) AS goal_id, UNNEST($3::boolean[]) AS is_active
+		) AS data
+		WHERE user_goal_progress.user_id = $1
+		  AND user_goal_progress.goal_id = data.goal_id
 	`
 
-	result, err := r.db.ExecContext(ctx, updateQuery, userID, pq.Array(goalIDs))
+	result, err := r.db.ExecContext(ctx, updateQuery, userID, pq.Array(goalIDs), pq.Array(isActiveVals))
 	if err != nil {
 		return errors.ErrDatabaseError("batch update goal active", err)
 	}
@@ -867,12 +873,8 @@ func (r *PostgresGoalRepository) BatchUpsertGoalActive(ctx context.Context, prog
 		return nil
 	}
 
-	// Step 2: Batch INSERT missing rows
-	// Build VALUES clause for missing rows only
-	// For simplicity, we'll insert all and use ON CONFLICT DO NOTHING
-	// PostgreSQL will skip existing rows (already updated in step 1)
-
-	// Build bulk INSERT query with multiple VALUES
+	// Step 2: Batch INSERT missing rows with actual is_active values
+	// Use ON CONFLICT DO UPDATE to handle race conditions
 	insertQuery := `
 		INSERT INTO user_goal_progress (
 			user_id, goal_id, challenge_id, namespace,
@@ -881,14 +883,14 @@ func (r *PostgresGoalRepository) BatchUpsertGoalActive(ctx context.Context, prog
 		) VALUES
 	`
 
-	values := make([]interface{}, 0, len(progresses)*4) // 4 actual values per row
+	values := make([]interface{}, 0, len(progresses)*5) // 5 actual values per row
 	valuePlaceholders := make([]string, 0, len(progresses))
 
 	for i, p := range progresses {
-		offset := i * 4
+		offset := i * 5
 		valuePlaceholders = append(valuePlaceholders, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, 0, 'not_started', true, NOW(), NOW(), NOW())",
-			offset+1, offset+2, offset+3, offset+4,
+			"($%d, $%d, $%d, $%d, 0, 'not_started', $%d, NOW(), NOW(), NOW())",
+			offset+1, offset+2, offset+3, offset+4, offset+5,
 		))
 
 		values = append(values,
@@ -896,11 +898,12 @@ func (r *PostgresGoalRepository) BatchUpsertGoalActive(ctx context.Context, prog
 			p.GoalID,
 			p.ChallengeID,
 			p.Namespace,
+			p.IsActive, // Use actual is_active value
 		)
 	}
 
 	insertQuery += strings.Join(valuePlaceholders, ", ")
-	insertQuery += " ON CONFLICT (user_id, goal_id) DO NOTHING"
+	insertQuery += " ON CONFLICT (user_id, goal_id) DO UPDATE SET is_active = EXCLUDED.is_active, assigned_at = CASE WHEN EXCLUDED.is_active THEN NOW() ELSE NULL END, updated_at = NOW()"
 
 	_, err = r.db.ExecContext(ctx, insertQuery, values...)
 	if err != nil {
@@ -1806,34 +1809,46 @@ func (r *PostgresTxRepository) UpsertGoalActive(ctx context.Context, progress *d
 	return nil
 }
 
-// BatchUpsertGoalActive activates multiple goals in a single database operation within a transaction (M4).
+// BatchUpsertGoalActive updates is_active status for multiple goals in a single database operation within a transaction (M4).
 // Transaction version of BatchUpsertGoalActive - uses r.tx instead of r.db.
+//
+// Supports both activation (is_active=true) and deactivation (is_active=false) through the same method.
+// This flexibility is required for M4's replace mode, where existing goals are deactivated before selecting new ones.
+//
+// Implementation uses UNNEST to map each goal to its specific is_active value:
+// 1. UPDATE existing rows: SET is_active = data.is_active FROM (UNNEST(goal_ids, is_active_vals))
+// 2. INSERT missing rows: INSERT ... ON CONFLICT DO UPDATE SET is_active = EXCLUDED.is_active
+//
+// Performance: ~10ms for 10 goals (vs ~20-50ms with individual UpsertGoalActive loop)
 func (r *PostgresTxRepository) BatchUpsertGoalActive(ctx context.Context, progresses []*domain.UserGoalProgress) error {
 	if len(progresses) == 0 {
 		return nil
 	}
 
-	// Extract goal IDs and build a map for lookups
+	// Extract goal IDs and is_active values
 	goalIDs := make([]string, len(progresses))
-	progressMap := make(map[string]*domain.UserGoalProgress)
+	isActiveVals := make([]bool, len(progresses))
 	userID := progresses[0].UserID // All progresses should have the same user_id
 
 	for i, p := range progresses {
 		goalIDs[i] = p.GoalID
-		progressMap[p.GoalID] = p
+		isActiveVals[i] = p.IsActive
 	}
 
-	// Step 1: Batch UPDATE existing rows
+	// Step 1: Batch UPDATE existing rows using UNNEST to map each goal to its is_active value
 	updateQuery := `
 		UPDATE user_goal_progress SET
-			is_active = true,
-			assigned_at = NOW(),
+			is_active = data.is_active,
+			assigned_at = CASE WHEN data.is_active THEN NOW() ELSE NULL END,
 			updated_at = NOW()
-		WHERE user_id = $1
-		  AND goal_id = ANY($2)
+		FROM (
+			SELECT UNNEST($2::text[]) AS goal_id, UNNEST($3::boolean[]) AS is_active
+		) AS data
+		WHERE user_goal_progress.user_id = $1
+		  AND user_goal_progress.goal_id = data.goal_id
 	`
 
-	result, err := r.tx.ExecContext(ctx, updateQuery, userID, pq.Array(goalIDs))
+	result, err := r.tx.ExecContext(ctx, updateQuery, userID, pq.Array(goalIDs), pq.Array(isActiveVals))
 	if err != nil {
 		return errors.ErrDatabaseError("batch update goal active in transaction", err)
 	}
@@ -1849,8 +1864,8 @@ func (r *PostgresTxRepository) BatchUpsertGoalActive(ctx context.Context, progre
 		return nil
 	}
 
-	// Step 2: Batch INSERT missing rows
-	// Build bulk INSERT query with multiple VALUES
+	// Step 2: Batch INSERT missing rows with actual is_active values
+	// Use ON CONFLICT DO UPDATE to handle race conditions
 	insertQuery := `
 		INSERT INTO user_goal_progress (
 			user_id, goal_id, challenge_id, namespace,
@@ -1859,14 +1874,14 @@ func (r *PostgresTxRepository) BatchUpsertGoalActive(ctx context.Context, progre
 		) VALUES
 	`
 
-	values := make([]interface{}, 0, len(progresses)*4) // 4 actual values per row
+	values := make([]interface{}, 0, len(progresses)*5) // 5 actual values per row
 	valuePlaceholders := make([]string, 0, len(progresses))
 
 	for i, p := range progresses {
-		offset := i * 4 // Only 4 values per row (user_id, goal_id, challenge_id, namespace)
+		offset := i * 5
 		valuePlaceholders = append(valuePlaceholders, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, 0, 'not_started', true, NOW(), NOW(), NOW())",
-			offset+1, offset+2, offset+3, offset+4,
+			"($%d, $%d, $%d, $%d, 0, 'not_started', $%d, NOW(), NOW(), NOW())",
+			offset+1, offset+2, offset+3, offset+4, offset+5,
 		))
 
 		values = append(values,
@@ -1874,11 +1889,12 @@ func (r *PostgresTxRepository) BatchUpsertGoalActive(ctx context.Context, progre
 			p.GoalID,
 			p.ChallengeID,
 			p.Namespace,
+			p.IsActive, // Use actual is_active value
 		)
 	}
 
 	insertQuery += strings.Join(valuePlaceholders, ", ")
-	insertQuery += " ON CONFLICT (user_id, goal_id) DO NOTHING"
+	insertQuery += " ON CONFLICT (user_id, goal_id) DO UPDATE SET is_active = EXCLUDED.is_active, assigned_at = CASE WHEN EXCLUDED.is_active THEN NOW() ELSE NULL END, updated_at = NOW()"
 
 	_, err = r.tx.ExecContext(ctx, insertQuery, values...)
 	if err != nil {

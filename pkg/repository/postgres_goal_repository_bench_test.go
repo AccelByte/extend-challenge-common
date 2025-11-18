@@ -44,7 +44,9 @@ func BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl(b *testing.B) {
 		}
 	}
 
-	err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+	// Use BulkInsertWithCOPY instead of BatchUpsertProgressWithCOPY because the latter
+	// only UPDATES existing rows (M3 Phase 9 lazy materialization) - it won't create new rows
+	err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 	if err != nil {
 		b.Fatalf("Setup failed: %v", err)
 	}
@@ -77,6 +79,9 @@ func BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl(b *testing.B) {
 				result, err := repo.GetProgress(ctx, fmt.Sprintf("bench-user-%d", j), fmt.Sprintf("bench-goal-%d", j))
 				if err != nil {
 					b.Fatalf("GetProgress failed: %v", err)
+				}
+				if result == nil {
+					b.Fatalf("GetProgress returned nil for user %d goal %d", j, j)
 				}
 
 				isActive := j%2 == 0
@@ -133,7 +138,9 @@ func BenchmarkBatchIncrementProgress_AssignmentControl(b *testing.B) {
 		}
 	}
 
-	err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+	// Use BulkInsertWithCOPY instead of BatchUpsertProgressWithCOPY because the latter
+	// only UPDATES existing rows (M3 Phase 9 lazy materialization) - it won't create new rows
+	err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 	if err != nil {
 		b.Fatalf("Setup failed: %v", err)
 	}
@@ -240,6 +247,13 @@ func BenchmarkIncrementProgress_AssignmentControl(b *testing.B) {
 
 	// Benchmark: Increment active goal
 	b.Run("ActiveGoal", func(b *testing.B) {
+		// Reset progress to 0 before each benchmark run to avoid state pollution
+		_, err := db.ExecContext(ctx, "UPDATE user_goal_progress SET progress = 0 WHERE user_id = $1 AND goal_id = $2",
+			"bench-user-active", "bench-goal-active")
+		if err != nil {
+			b.Fatalf("Failed to reset progress: %v", err)
+		}
+
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			err := repo.IncrementProgress(ctx, "bench-user-active", "bench-goal-active", "bench-challenge", "test", 1, 100, false)

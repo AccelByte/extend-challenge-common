@@ -18,7 +18,7 @@ import (
 // Run with: docker run -d --name test-postgres -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:15
 // Or use docker-compose with a test database
 
-const testDSN = "postgres://postgres:test@localhost:5433/postgres?sslmode=disable"
+const testDSN = "postgres://testuser:testpass@localhost:5433/testdb?sslmode=disable"
 
 // setupTestDB creates a test database connection and applies schema.
 func setupTestDB(t *testing.T) *sql.DB {
@@ -5463,6 +5463,288 @@ func TestPostgresGoalRepository_BatchUpsertGoalActive(t *testing.T) {
 		for _, p := range result {
 			if !p.IsActive {
 				t.Errorf("Goal %s should be active", p.GoalID)
+			}
+		}
+	})
+
+	t.Run("deactivates multiple active goals in single operation", func(t *testing.T) {
+		// Setup: Create 3 active goals with progress
+		now := time.Now()
+		initialProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-deactivate-1",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    5,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-deactivate-1",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    10,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-deactivate-1",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		err := repo.BulkInsert(ctx, initialProgresses)
+		if err != nil {
+			t.Fatalf("BulkInsert failed: %v", err)
+		}
+
+		// Execute: BatchUpsertGoalActive to deactivate them
+		deactivateProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-deactivate-1",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+			{
+				UserID:      "batch-user-deactivate-1",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+			{
+				UserID:      "batch-user-deactivate-1",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+		}
+
+		start := time.Now()
+		err = repo.BatchUpsertGoalActive(ctx, deactivateProgresses)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			t.Fatalf("BatchUpsertGoalActive failed: %v", err)
+		}
+
+		// Verify: All goals are now inactive, progress preserved
+		result, err := repo.GetUserProgress(ctx, "batch-user-deactivate-1", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(result) != 3 {
+			t.Errorf("Expected 3 records, got %d", len(result))
+		}
+
+		for _, p := range result {
+			if p.IsActive {
+				t.Errorf("Goal %s should be inactive", p.GoalID)
+			}
+			if p.AssignedAt != nil {
+				t.Errorf("Goal %s should have assigned_at cleared", p.GoalID)
+			}
+
+			// Verify progress is preserved during deactivation
+			switch p.GoalID {
+			case "goal-1":
+				if p.Progress != 5 {
+					t.Errorf("Goal goal-1 should have progress 5, got %d", p.Progress)
+				}
+				if p.Status != domain.GoalStatusInProgress {
+					t.Errorf("Goal goal-1 should have status 'in_progress', got %s", p.Status)
+				}
+			case "goal-2":
+				if p.Progress != 10 {
+					t.Errorf("Goal goal-2 should have progress 10, got %d", p.Progress)
+				}
+				if p.Status != domain.GoalStatusInProgress {
+					t.Errorf("Goal goal-2 should have status 'in_progress', got %s", p.Status)
+				}
+			case "goal-3":
+				if p.Progress != 0 {
+					t.Errorf("Goal goal-3 should have progress 0, got %d", p.Progress)
+				}
+				if p.Status != domain.GoalStatusNotStarted {
+					t.Errorf("Goal goal-3 should have status 'not_started', got %s", p.Status)
+				}
+			}
+		}
+
+		// Verify: Performance < 20ms
+		if elapsed > 20*time.Millisecond {
+			t.Logf("Warning: BatchUpsertGoalActive(deactivate 3) took %v (expected < 20ms)", elapsed)
+		}
+	})
+
+	t.Run("deactivates and reactivates goals preserving progress (M4 replace mode)", func(t *testing.T) {
+		// Setup: Create 3 active goals with progress
+		now := time.Now()
+		initialProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    15,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    8,
+				Status:      domain.GoalStatusInProgress,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				Progress:    20,
+				Status:      domain.GoalStatusCompleted,
+				IsActive:    true,
+				AssignedAt:  &now,
+			},
+		}
+
+		err := repo.BulkInsert(ctx, initialProgresses)
+		if err != nil {
+			t.Fatalf("BulkInsert failed: %v", err)
+		}
+
+		// Step 1: Deactivate all goals (simulate replace mode step 1)
+		deactivateProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-2",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    false,
+				AssignedAt:  nil,
+			},
+		}
+
+		err = repo.BatchUpsertGoalActive(ctx, deactivateProgresses)
+		if err != nil {
+			t.Fatalf("Deactivate failed: %v", err)
+		}
+
+		// Verify all inactive
+		afterDeactivate, err := repo.GetUserProgress(ctx, "batch-user-replace-1", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		for _, p := range afterDeactivate {
+			if p.IsActive {
+				t.Errorf("Goal %s should be inactive after deactivation", p.GoalID)
+			}
+		}
+
+		// Step 2: Reactivate some goals (simulate replace mode step 2)
+		reactivateNow := time.Now()
+		reactivateProgresses := []*domain.UserGoalProgress{
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-1",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &reactivateNow,
+			},
+			{
+				UserID:      "batch-user-replace-1",
+				GoalID:      "goal-3",
+				ChallengeID: "challenge-1",
+				Namespace:   "test",
+				IsActive:    true,
+				AssignedAt:  &reactivateNow,
+			},
+		}
+
+		err = repo.BatchUpsertGoalActive(ctx, reactivateProgresses)
+		if err != nil {
+			t.Fatalf("Reactivate failed: %v", err)
+		}
+
+		// Verify: goal-1 and goal-3 active, goal-2 inactive, all progress preserved
+		afterReactivate, err := repo.GetUserProgress(ctx, "batch-user-replace-1", false)
+		if err != nil {
+			t.Fatalf("GetUserProgress failed: %v", err)
+		}
+
+		if len(afterReactivate) != 3 {
+			t.Errorf("Expected 3 records, got %d", len(afterReactivate))
+		}
+
+		for _, p := range afterReactivate {
+			switch p.GoalID {
+			case "goal-1":
+				if !p.IsActive {
+					t.Errorf("Goal goal-1 should be active after reactivation")
+				}
+				if p.Progress != 15 {
+					t.Errorf("Goal goal-1 progress should be preserved (15), got %d", p.Progress)
+				}
+				if p.Status != domain.GoalStatusInProgress {
+					t.Errorf("Goal goal-1 status should be preserved, got %s", p.Status)
+				}
+			case "goal-2":
+				if p.IsActive {
+					t.Errorf("Goal goal-2 should remain inactive")
+				}
+				if p.Progress != 8 {
+					t.Errorf("Goal goal-2 progress should be preserved (8), got %d", p.Progress)
+				}
+			case "goal-3":
+				if !p.IsActive {
+					t.Errorf("Goal goal-3 should be active after reactivation")
+				}
+				if p.Progress != 20 {
+					t.Errorf("Goal goal-3 progress should be preserved (20), got %d", p.Progress)
+				}
+				if p.Status != domain.GoalStatusCompleted {
+					t.Errorf("Goal goal-3 status should be preserved (completed), got %s", p.Status)
+				}
 			}
 		}
 	})

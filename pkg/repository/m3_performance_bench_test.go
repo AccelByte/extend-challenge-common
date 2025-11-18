@@ -43,7 +43,9 @@ func BenchmarkM3_BatchUpsertCOPY_MixedActiveInactive(b *testing.B) {
 				}
 			}
 
-			err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+			// Use BulkInsertWithCOPY instead of BatchUpsertProgressWithCOPY because the latter
+			// only UPDATES existing rows (M3 Phase 9 lazy materialization) - it won't create new rows
+			err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 			if err != nil {
 				b.Fatalf("Setup failed: %v", err)
 			}
@@ -140,7 +142,9 @@ func BenchmarkM3_BatchIncrement_MixedActiveInactive(b *testing.B) {
 				}
 			}
 
-			err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+			// Use BulkInsertWithCOPY instead of BatchUpsertProgressWithCOPY because the latter
+			// only UPDATES existing rows (M3 Phase 9 lazy materialization) - it won't create new rows
+			err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 			if err != nil {
 				b.Fatalf("Setup failed: %v", err)
 			}
