@@ -26,6 +26,9 @@ const (
 	// Validation errors
 	ErrCodeValidationFailed = "VALIDATION_FAILED"
 	ErrCodeInvalidInput     = "INVALID_INPUT"
+
+	// M4: Goal selection errors
+	ErrCodeInsufficientGoals = "INSUFFICIENT_GOALS"
 )
 
 // ChallengeError represents an error in the challenge service.
@@ -125,6 +128,15 @@ func ErrValidationFailed(field, reason string) *ChallengeError {
 	return &ChallengeError{
 		Code:    ErrCodeValidationFailed,
 		Message: fmt.Sprintf("validation failed for %s: %s", field, reason),
+		Err:     nil,
+	}
+}
+
+// ErrInsufficientGoals returns an error when not enough goals are available for selection.
+func ErrInsufficientGoals(available, requested int) *ChallengeError {
+	return &ChallengeError{
+		Code:    ErrCodeInsufficientGoals,
+		Message: fmt.Sprintf("no goals available for selection (available: %d, requested: %d)", available, requested),
 		Err:     nil,
 	}
 }
