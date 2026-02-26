@@ -326,56 +326,69 @@ func TestConfigLoader_LoadConfig(t *testing.T) {
 			t.Fatal("LoadConfig() returned nil config")
 		}
 
-		// Verify type defaults to "absolute"
-		if config.Challenges[0].Goals[0].Type != domain.GoalTypeAbsolute {
-			t.Errorf("expected type to default to 'absolute', got %q", config.Challenges[0].Goals[0].Type)
+		// Verify progressMode defaults to "absolute"
+		if config.Challenges[0].Goals[0].Requirement.ProgressMode != domain.ProgressModeAbsolute {
+			t.Errorf("expected progressMode to default to 'absolute', got %q", config.Challenges[0].Goals[0].Requirement.ProgressMode)
 		}
 	})
+}
 
-	t.Run("default behavior - empty type field defaults to absolute", func(t *testing.T) {
-		tmpFile := createTempConfigFile(t, `{
-			"challenges": [
-				{
-					"challengeId": "challenge-1",
-					"name": "Challenge 1",
-					"description": "Description",
-					"goals": [
-						{
-							"goalId": "goal-1",
-							"name": "Goal 1",
-							"description": "Description",
-							"type": "",
-							"eventSource": "statistic",
-							"requirement": {
-								"statCode": "stat_code",
-								"operator": ">=",
-								"targetValue": 10
-							},
-							"reward": {
-								"type": "ITEM",
-								"rewardId": "item_1",
-								"quantity": 1
-							},
-							"prerequisites": []
-						}
-					]
-				}
-			]
-		}`)
-		defer func() { _ = os.Remove(tmpFile) }()
+func TestConfigLoader_ProgressMode_DefaultsToAbsolute(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
 
-		loader := NewConfigLoader(tmpFile, logger)
-		config, err := loader.LoadConfig()
+	tmpFile := createTempConfigFile(t, `{
+		"challenges": [{
+			"challengeId": "c1", "name": "C1", "description": "D",
+			"goals": [{
+				"goalId": "g1", "name": "G1", "description": "D",
+				"eventSource": "statistic",
+				"requirement": {"statCode": "stat1", "operator": ">=", "targetValue": 1},
+				"reward": {"type": "ITEM", "rewardId": "item1", "quantity": 1},
+				"prerequisites": []
+			}]
+		}]
+	}`)
+	defer func() { _ = os.Remove(tmpFile) }()
 
-		if err != nil {
-			t.Fatalf("LoadConfig() unexpected error = %v", err)
-		}
+	loader := NewConfigLoader(tmpFile, logger)
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() unexpected error = %v", err)
+	}
 
-		// Verify empty type defaults to "absolute"
-		if config.Challenges[0].Goals[0].Type != domain.GoalTypeAbsolute {
-			t.Errorf("expected empty type to default to 'absolute', got %q", config.Challenges[0].Goals[0].Type)
-		}
-	})
+	got := config.Challenges[0].Goals[0].Requirement.ProgressMode
+	if got != domain.ProgressModeAbsolute {
+		t.Errorf("ProgressMode = %q, want %q (should default to absolute)", got, domain.ProgressModeAbsolute)
+	}
+}
+
+func TestConfigLoader_ProgressMode_ExplicitInJSON_Preserved(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	tmpFile := createTempConfigFile(t, `{
+		"challenges": [{
+			"challengeId": "c1", "name": "C1", "description": "D",
+			"goals": [{
+				"goalId": "g1", "name": "G1", "description": "D",
+				"eventSource": "statistic",
+				"requirement": {"statCode": "stat1", "operator": ">=", "targetValue": 1, "progressMode": "relative"},
+				"reward": {"type": "ITEM", "rewardId": "item1", "quantity": 1},
+				"prerequisites": []
+			}]
+		}]
+	}`)
+	defer func() { _ = os.Remove(tmpFile) }()
+
+	loader := NewConfigLoader(tmpFile, logger)
+	config, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() unexpected error = %v", err)
+	}
+
+	got := config.Challenges[0].Goals[0].Requirement.ProgressMode
+	if got != domain.ProgressModeRelative {
+		t.Errorf("ProgressMode = %q, want %q (explicit should not be overwritten)", got, domain.ProgressModeRelative)
+	}
 }
 
 func TestConfigLoader_countGoals(t *testing.T) {

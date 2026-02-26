@@ -351,12 +351,12 @@ func createTestConfig() *config.Config {
 						Name:        "Goal 1",
 						Description: "Description",
 						ChallengeID: "challenge-1",
-						Type:        domain.GoalTypeAbsolute,
 						EventSource: domain.EventSourceStatistic,
 						Requirement: domain.Requirement{
-							StatCode:    "stat_code_1",
-							Operator:    ">=",
-							TargetValue: 10,
+							StatCode:     "stat_code_1",
+							Operator:     ">=",
+							TargetValue:  10,
+							ProgressMode: domain.ProgressModeAbsolute,
 						},
 						Reward: domain.Reward{
 							Type:     "ITEM",
@@ -370,12 +370,12 @@ func createTestConfig() *config.Config {
 						Name:        "Goal 2",
 						Description: "Description",
 						ChallengeID: "challenge-1",
-						Type:        domain.GoalTypeAbsolute,
 						EventSource: domain.EventSourceStatistic,
 						Requirement: domain.Requirement{
-							StatCode:    "stat_code_2",
-							Operator:    ">=",
-							TargetValue: 20,
+							StatCode:     "stat_code_2",
+							Operator:     ">=",
+							TargetValue:  20,
+							ProgressMode: domain.ProgressModeAbsolute,
 						},
 						Reward: domain.Reward{
 							Type:     "WALLET",
@@ -396,12 +396,12 @@ func createTestConfig() *config.Config {
 						Name:        "Goal 3",
 						Description: "Description",
 						ChallengeID: "challenge-2",
-						Type:        domain.GoalTypeAbsolute,
 						EventSource: domain.EventSourceStatistic,
 						Requirement: domain.Requirement{
-							StatCode:    "stat_code_1", // Same stat code as goal-1
-							Operator:    ">=",
-							TargetValue: 30,
+							StatCode:     "stat_code_1", // Same stat code as goal-1
+							Operator:     ">=",
+							TargetValue:  30,
+							ProgressMode: domain.ProgressModeAbsolute,
 						},
 						Reward: domain.Reward{
 							Type:     "ITEM",
@@ -448,13 +448,13 @@ func TestInMemoryGoalCache_GetGoalsWithDefaultAssigned(t *testing.T) {
 						Name:            "Default Goal 1",
 						Description:     "Assigned by default",
 						ChallengeID:     "challenge-1",
-						Type:            domain.GoalTypeAbsolute,
 						EventSource:     domain.EventSourceStatistic,
 						DefaultAssigned: true, // M3: Default assigned
 						Requirement: domain.Requirement{
-							StatCode:    "stat_code_1",
-							Operator:    ">=",
-							TargetValue: 10,
+							StatCode:     "stat_code_1",
+							Operator:     ">=",
+							TargetValue:  10,
+							ProgressMode: domain.ProgressModeAbsolute,
 						},
 						Reward: domain.Reward{
 							Type:     "ITEM",
@@ -467,13 +467,13 @@ func TestInMemoryGoalCache_GetGoalsWithDefaultAssigned(t *testing.T) {
 						Name:            "Manual Goal",
 						Description:     "Not assigned by default",
 						ChallengeID:     "challenge-1",
-						Type:            domain.GoalTypeAbsolute,
 						EventSource:     domain.EventSourceStatistic,
 						DefaultAssigned: false, // M3: Not default assigned
 						Requirement: domain.Requirement{
-							StatCode:    "stat_code_2",
-							Operator:    ">=",
-							TargetValue: 20,
+							StatCode:     "stat_code_2",
+							Operator:     ">=",
+							TargetValue:  20,
+							ProgressMode: domain.ProgressModeAbsolute,
 						},
 						Reward: domain.Reward{
 							Type:     "WALLET",
@@ -493,13 +493,13 @@ func TestInMemoryGoalCache_GetGoalsWithDefaultAssigned(t *testing.T) {
 						Name:            "Default Goal 2",
 						Description:     "Also assigned by default",
 						ChallengeID:     "challenge-2",
-						Type:            domain.GoalTypeIncrement,
 						EventSource:     domain.EventSourceLogin,
 						DefaultAssigned: true, // M3: Default assigned
 						Requirement: domain.Requirement{
-							StatCode:    "login_count",
-							Operator:    ">=",
-							TargetValue: 7,
+							StatCode:     "login_count",
+							Operator:     ">=",
+							TargetValue:  7,
+							ProgressMode: domain.ProgressModeRelative,
 						},
 						Reward: domain.Reward{
 							Type:     "ITEM",
@@ -568,13 +568,13 @@ func TestInMemoryGoalCache_GetGoalsWithDefaultAssigned(t *testing.T) {
 							Name:            "Goal 1",
 							Description:     "Not default",
 							ChallengeID:     "challenge-1",
-							Type:            domain.GoalTypeAbsolute,
 							EventSource:     domain.EventSourceStatistic,
 							DefaultAssigned: false,
 							Requirement: domain.Requirement{
-								StatCode:    "stat_code_1",
-								Operator:    ">=",
-								TargetValue: 10,
+								StatCode:     "stat_code_1",
+								Operator:     ">=",
+								TargetValue:  10,
+								ProgressMode: domain.ProgressModeAbsolute,
 							},
 							Reward: domain.Reward{
 								Type:     "ITEM",

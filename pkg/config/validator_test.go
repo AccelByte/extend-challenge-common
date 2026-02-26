@@ -27,12 +27,12 @@ func TestValidator_Validate(t *testing.T) {
 								ID:          "goal-1",
 								Name:        "Goal 1",
 								Description: "Description",
-								Type:        domain.GoalTypeAbsolute,
 								EventSource: domain.EventSourceStatistic,
 								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
+									StatCode:     "stat_code",
+									Operator:     ">=",
+									TargetValue:  10,
+									ProgressMode: domain.ProgressModeAbsolute,
 								},
 								Reward: domain.Reward{
 									Type:     "ITEM",
@@ -611,575 +611,17 @@ func TestValidator_Validate(t *testing.T) {
 							{
 								ID:          "goal-1",
 								Name:        "Goal 1",
-								Type:        domain.GoalTypeAbsolute,
 								EventSource: domain.EventSourceStatistic,
 								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
+									StatCode:     "stat_code",
+									Operator:     ">=",
+									TargetValue:  10,
+									ProgressMode: domain.ProgressModeAbsolute,
 								},
 								Reward: domain.Reward{
 									Type:     "WALLET",
 									RewardID: "GOLD",
 									Quantity: 100,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		// Goal type validation tests
-		{
-			name: "valid goal type - absolute",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeAbsolute,
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid goal type - increment",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeIncrement,
-								EventSource: domain.EventSourceLogin,
-								Requirement: domain.Requirement{
-									StatCode:    "login_count",
-									Operator:    ">=",
-									TargetValue: 7,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid goal type - daily",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeDaily,
-								EventSource: domain.EventSourceLogin,
-								Requirement: domain.Requirement{
-									StatCode:    "daily_login",
-									Operator:    ">=",
-									TargetValue: 7,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid goal type - unknown",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "unknown",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'unknown'",
-		},
-		{
-			name: "invalid goal type - weekly",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "weekly",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'weekly'",
-		},
-		{
-			name: "invalid goal type - streak",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "streak",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'streak'",
-		},
-		{
-			name: "invalid goal type - typo absolut",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "absolut",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'absolut'",
-		},
-		{
-			name: "invalid goal type - typo incremen",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "incremen",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'incremen'",
-		},
-		{
-			name: "invalid goal type - typo daly",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "daly",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'daly'",
-		},
-		{
-			name: "invalid goal type - empty string is valid (defaults to absolute)",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid goal type - uppercase ABSOLUTE",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "ABSOLUTE",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'ABSOLUTE'",
-		},
-		{
-			name: "invalid goal type - mixed case Increment",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        "Increment",
-								EventSource: domain.EventSourceStatistic,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "invalid goal type 'Increment'",
-		},
-		// Daily flag validation tests
-		{
-			name: "valid daily flag - increment with daily=true",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeIncrement,
-								EventSource: domain.EventSourceLogin,
-								Daily:       true,
-								Requirement: domain.Requirement{
-									StatCode:    "login_count",
-									Operator:    ">=",
-									TargetValue: 7,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid daily flag - increment with daily=false",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeIncrement,
-								EventSource: domain.EventSourceLogin,
-								Daily:       false,
-								Requirement: domain.Requirement{
-									StatCode:    "login_count",
-									Operator:    ">=",
-									TargetValue: 100,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "invalid daily flag - absolute with daily=true",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeAbsolute,
-								EventSource: domain.EventSourceStatistic,
-								Daily:       true,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "daily flag can only be true for increment-type goals",
-		},
-		{
-			name: "invalid daily flag - daily type with daily=true",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeDaily,
-								EventSource: domain.EventSourceLogin,
-								Daily:       true,
-								Requirement: domain.Requirement{
-									StatCode:    "login_daily",
-									Operator:    ">=",
-									TargetValue: 1,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: true,
-			errMsg:  "daily flag can only be true for increment-type goals",
-		},
-		{
-			name: "valid - absolute with daily=false (ignored)",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeAbsolute,
-								EventSource: domain.EventSourceStatistic,
-								Daily:       false,
-								Requirement: domain.Requirement{
-									StatCode:    "stat_code",
-									Operator:    ">=",
-									TargetValue: 10,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
-								},
-							},
-						},
-					},
-				},
-			},
-			wantErr: false,
-		},
-		{
-			name: "valid - daily type with daily=false (ignored)",
-			config: &Config{
-				Challenges: []*domain.Challenge{
-					{
-						ID:   "challenge-1",
-						Name: "Challenge 1",
-						Goals: []*domain.Goal{
-							{
-								ID:          "goal-1",
-								Name:        "Goal 1",
-								Type:        domain.GoalTypeDaily,
-								EventSource: domain.EventSourceLogin,
-								Daily:       false,
-								Requirement: domain.Requirement{
-									StatCode:    "login_daily",
-									Operator:    ">=",
-									TargetValue: 1,
-								},
-								Reward: domain.Reward{
-									Type:     "ITEM",
-									RewardID: "item_1",
-									Quantity: 1,
 								},
 							},
 						},
@@ -1207,6 +649,107 @@ func TestValidator_Validate(t *testing.T) {
 				if err != nil {
 					t.Errorf("Validate() unexpected error = %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestValidator_ProgressMode_Invalid(t *testing.T) {
+	tests := []struct {
+		name   string
+		mode   domain.ProgressMode
+		errMsg string
+	}{
+		{"invalid progressMode - unknown", domain.ProgressMode("unknown"), "invalid progressMode 'unknown'"},
+		{"invalid progressMode - increment", domain.ProgressMode("increment"), "invalid progressMode 'increment'"},
+		{"invalid progressMode - daily", domain.ProgressMode("daily"), "invalid progressMode 'daily'"},
+		{"invalid progressMode - ABSOLUTE uppercase", domain.ProgressMode("ABSOLUTE"), "invalid progressMode 'ABSOLUTE'"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Challenges: []*domain.Challenge{
+					{
+						ID:   "challenge-1",
+						Name: "Challenge 1",
+						Goals: []*domain.Goal{
+							{
+								ID:          "goal-1",
+								Name:        "Goal 1",
+								EventSource: domain.EventSourceStatistic,
+								Requirement: domain.Requirement{
+									StatCode:     "stat_code",
+									Operator:     ">=",
+									TargetValue:  10,
+									ProgressMode: tt.mode,
+								},
+								Reward: domain.Reward{
+									Type:     "ITEM",
+									RewardID: "item_1",
+									Quantity: 1,
+								},
+							},
+						},
+					},
+				},
+			}
+
+			v := NewValidator()
+			err := v.Validate(config)
+			if err == nil {
+				t.Errorf("Validate() expected error for progressMode %q, got nil", tt.mode)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.errMsg) {
+				t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+			}
+		})
+	}
+}
+
+func TestValidator_ProgressMode_Valid(t *testing.T) {
+	tests := []struct {
+		name string
+		mode domain.ProgressMode
+	}{
+		{"valid progressMode - absolute", domain.ProgressModeAbsolute},
+		{"valid progressMode - relative", domain.ProgressModeRelative},
+		{"valid progressMode - empty (not validated)", domain.ProgressMode("")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &Config{
+				Challenges: []*domain.Challenge{
+					{
+						ID:   "challenge-1",
+						Name: "Challenge 1",
+						Goals: []*domain.Goal{
+							{
+								ID:          "goal-1",
+								Name:        "Goal 1",
+								EventSource: domain.EventSourceStatistic,
+								Requirement: domain.Requirement{
+									StatCode:     "stat_code",
+									Operator:     ">=",
+									TargetValue:  10,
+									ProgressMode: tt.mode,
+								},
+								Reward: domain.Reward{
+									Type:     "ITEM",
+									RewardID: "item_1",
+									Quantity: 1,
+								},
+							},
+						},
+					},
+				},
+			}
+
+			v := NewValidator()
+			if err := v.Validate(config); err != nil {
+				t.Errorf("Validate() unexpected error for progressMode %q: %v", tt.mode, err)
 			}
 		})
 	}

@@ -52,63 +52,25 @@ func TestEventSource_IsValid(t *testing.T) {
 	}
 }
 
-func TestGoalType_IsValid(t *testing.T) {
+func TestProgressMode_IsValid(t *testing.T) {
 	tests := []struct {
-		name     string
-		goalType GoalType
-		want     bool
+		name string
+		mode ProgressMode
+		want bool
 	}{
-		{
-			name:     "absolute is valid",
-			goalType: GoalTypeAbsolute,
-			want:     true,
-		},
-		{
-			name:     "increment is valid",
-			goalType: GoalTypeIncrement,
-			want:     true,
-		},
-		{
-			name:     "daily is valid",
-			goalType: GoalTypeDaily,
-			want:     true,
-		},
-		{
-			name:     "invalid type",
-			goalType: GoalType("invalid"),
-			want:     false,
-		},
-		{
-			name:     "empty type",
-			goalType: GoalType(""),
-			want:     false,
-		},
-		{
-			name:     "weekly (not supported)",
-			goalType: GoalType("weekly"),
-			want:     false,
-		},
-		{
-			name:     "streak (not supported)",
-			goalType: GoalType("streak"),
-			want:     false,
-		},
-		{
-			name:     "uppercase ABSOLUTE",
-			goalType: GoalType("ABSOLUTE"),
-			want:     false,
-		},
-		{
-			name:     "mixed case Increment",
-			goalType: GoalType("Increment"),
-			want:     false,
-		},
+		{name: "absolute is valid", mode: ProgressModeAbsolute, want: true},
+		{name: "relative is valid", mode: ProgressModeRelative, want: true},
+		{name: "empty is invalid", mode: ProgressMode(""), want: false},
+		{name: "increment is invalid", mode: ProgressMode("increment"), want: false},
+		{name: "daily is invalid", mode: ProgressMode("daily"), want: false},
+		{name: "uppercase ABSOLUTE is invalid", mode: ProgressMode("ABSOLUTE"), want: false},
+		{name: "unknown mode is invalid", mode: ProgressMode("weekly"), want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.goalType.IsValid(); got != tt.want {
-				t.Errorf("GoalType.IsValid() = %v, want %v for type %q", got, tt.want, tt.goalType)
+			if got := tt.mode.IsValid(); got != tt.want {
+				t.Errorf("ProgressMode.IsValid() = %v, want %v for mode %q", got, tt.want, tt.mode)
 			}
 		})
 	}

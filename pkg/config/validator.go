@@ -99,9 +99,9 @@ func (v *Validator) validateGoal(goal *domain.Goal) error {
 		return errors.New("goal name cannot be empty")
 	}
 
-	// Validate goal type
-	if goal.Type != "" && !goal.Type.IsValid() {
-		return fmt.Errorf("invalid goal type '%s' (must be 'absolute', 'increment', or 'daily')", goal.Type)
+	// Validate progress mode
+	if goal.Requirement.ProgressMode != "" && !goal.Requirement.ProgressMode.IsValid() {
+		return fmt.Errorf("invalid progressMode '%s' (must be 'absolute' or 'relative')", goal.Requirement.ProgressMode)
 	}
 
 	// Validate event source (required field)
@@ -110,11 +110,6 @@ func (v *Validator) validateGoal(goal *domain.Goal) error {
 	}
 	if !goal.EventSource.IsValid() {
 		return fmt.Errorf("invalid event_source '%s' (must be 'login' or 'statistic')", goal.EventSource)
-	}
-
-	// Validate daily flag (only valid for increment type)
-	if goal.Daily && goal.Type != domain.GoalTypeIncrement {
-		return fmt.Errorf("daily flag can only be true for increment-type goals (current type: '%s')", goal.Type)
 	}
 
 	// Validate requirement

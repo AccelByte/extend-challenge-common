@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+
+	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
 
 // ConfigLoader loads and validates challenge configuration from a JSON file.
@@ -53,15 +55,15 @@ func (l *ConfigLoader) LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config JSON: %w", err)
 	}
 
-	// Step 3: Populate ChallengeID and set default Type for each Goal
+	// Step 3: Populate ChallengeID and default ProgressMode
 	// This links each goal to its parent challenge for easier lookups
-	// and provides backward compatibility for configs without explicit type
+	// and provides a sensible default for configs without explicit progressMode
 	for _, challenge := range config.Challenges {
 		for _, goal := range challenge.Goals {
 			goal.ChallengeID = challenge.ID
-			// Backward compatibility: default to "absolute" if type is empty
-			if goal.Type == "" {
-				goal.Type = "absolute"
+			// Default to "absolute" if progressMode is empty
+			if goal.Requirement.ProgressMode == "" {
+				goal.Requirement.ProgressMode = domain.ProgressModeAbsolute
 			}
 		}
 	}

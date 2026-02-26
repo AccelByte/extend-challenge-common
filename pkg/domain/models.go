@@ -36,47 +36,6 @@ func (e EventSource) IsValid() bool {
 	}
 }
 
-// GoalType defines how progress is tracked for a goal.
-//
-// Usage in Event Processing:
-//   - absolute: Set progress = event.statValue (e.g., kills = 100)
-//   - increment (daily=false): progress = progress + 1 (every event)
-//   - increment (daily=true): progress = progress + 1 (once per day)
-//   - daily: Set completed_at = NOW() (progress unused)
-//
-// Usage in Claim Validation:
-//   - absolute/increment: Check progress >= target_value
-//   - daily: Check DATE(completed_at) = TODAY
-type GoalType string
-
-const (
-	// GoalTypeAbsolute tracks progress with absolute values (e.g., "kill 100 enemies").
-	// Progress is set to the exact value from the event.
-	// Example: Stat "kills" = 50 → progress = 50, then "kills" = 100 → progress = 100.
-	GoalTypeAbsolute GoalType = "absolute"
-
-	// GoalTypeIncrement tracks progress with incremental updates (e.g., "login 7 times").
-	// Progress is incremented by a delta value each time.
-	// When Daily flag is true: Only increments once per day (e.g., "login 7 different days").
-	// When Daily flag is false: Increments on every event (e.g., "login 100 total times").
-	GoalTypeIncrement GoalType = "increment"
-
-	// GoalTypeDaily tracks whether an event occurred today (e.g., "daily login reward").
-	// Stores last event timestamp in completed_at. Claim validates if completed_at date equals today.
-	// Progress value is not used for completion check. Suitable for daily repeating rewards.
-	GoalTypeDaily GoalType = "daily"
-)
-
-// IsValid returns true if the goal type is a valid type.
-func (t GoalType) IsValid() bool {
-	switch t {
-	case GoalTypeAbsolute, GoalTypeIncrement, GoalTypeDaily:
-		return true
-	default:
-		return false
-	}
-}
-
 // Goal represents a single objective that users can complete to earn rewards.
 // Goals track progress via stat codes from AGS events.
 type Goal struct {
@@ -84,20 +43,58 @@ type Goal struct {
 	Name            string      `json:"name"`
 	Description     string      `json:"description"`
 	ChallengeID     string      `json:"challengeId"`     // Parent challenge ID
-	Type            GoalType    `json:"type"`            // How progress is tracked (absolute, increment, daily)
 	EventSource     EventSource `json:"eventSource"`     // Which event stream triggers this goal (login, statistic)
-	Daily           bool        `json:"daily"`           // For increment type: true = count once per day, false = count every occurrence
 	DefaultAssigned bool        `json:"defaultAssigned"` // M3: Whether goal is assigned by default to new players
 	Requirement     Requirement `json:"requirement"`
 	Reward          Reward      `json:"reward"`
 	Prerequisites   []string    `json:"prerequisites"` // Goal IDs that must be completed first
 }
 
+// ProgressMode defines how progress is tracked for a goal's requirement.
+//
+// Usage in Event Processing:
+//   - absolute: Set progress = event.statValue (e.g., kills = 100)
+//   - relative: Track incremental progress from a baseline (future: Phase 5 rotation)
+//
+// In Phase 0.5, both modes route to the same absolute handler.
+// The distinction only matters in Phase 5+ when baseline/rotation computation is added.
+type ProgressMode string
+
+const (
+	// ProgressModeAbsolute tracks progress with absolute stat values.
+	// Progress is set to the exact value from the event.
+	ProgressModeAbsolute ProgressMode = "absolute"
+
+	// ProgressModeRelative tracks progress relative to a baseline.
+	// In Phase 0.5, behaves identically to absolute.
+	// In Phase 5+, progress = currentStat - baseline.
+	ProgressModeRelative ProgressMode = "relative"
+)
+
+// IsValid returns true if the progress mode is a valid type.
+func (m ProgressMode) IsValid() bool {
+	switch m {
+	case ProgressModeAbsolute, ProgressModeRelative:
+		return true
+	default:
+		return false
+	}
+}
+
+// StatUpdate represents a stat value update from an AGS event.
+// Value is the absolute stat value (nil for login events which have no stat).
+// Inc is the incremental change (always >= 1), extracted from AGS stat events for future baseline computation.
+type StatUpdate struct {
+	Value *int // Absolute stat value (nil for login events)
+	Inc   int  // Incremental change (always >= 1)
+}
+
 // Requirement defines the condition that must be met to complete a goal.
 type Requirement struct {
-	StatCode    string `json:"statCode"`    // Event field to track (e.g., "snowman_kills")
-	Operator    string `json:"operator"`    // Comparison operator (only ">=" in M1)
-	TargetValue int    `json:"targetValue"` // Goal threshold
+	StatCode     string       `json:"statCode"`               // Event field to track (e.g., "snowman_kills")
+	Operator     string       `json:"operator"`               // Comparison operator (only ">=" in M1)
+	TargetValue  int          `json:"targetValue"`            // Goal threshold
+	ProgressMode ProgressMode `json:"progressMode,omitempty"` // How progress is tracked (absolute, relative)
 }
 
 // RewardType defines the type of reward granted to the user.
