@@ -77,6 +77,52 @@ func TestProgressMode_IsValid(t *testing.T) {
 	}
 }
 
+func TestRotationSchedule_IsValid(t *testing.T) {
+	tests := []struct {
+		name     string
+		schedule RotationSchedule
+		want     bool
+	}{
+		{name: "daily is valid", schedule: RotationScheduleDaily, want: true},
+		{name: "weekly is valid", schedule: RotationScheduleWeekly, want: true},
+		{name: "monthly is valid", schedule: RotationScheduleMonthly, want: true},
+		{name: "empty is invalid", schedule: RotationSchedule(""), want: false},
+		{name: "hourly is invalid", schedule: RotationSchedule("hourly"), want: false},
+		{name: "uppercase DAILY is invalid", schedule: RotationSchedule("DAILY"), want: false},
+		{name: "yearly is invalid", schedule: RotationSchedule("yearly"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.schedule.IsValid(); got != tt.want {
+				t.Errorf("RotationSchedule.IsValid() = %v, want %v for schedule %q", got, tt.want, tt.schedule)
+			}
+		})
+	}
+}
+
+func TestRotationType_IsValid(t *testing.T) {
+	tests := []struct {
+		name    string
+		rotType RotationType
+		want    bool
+	}{
+		{name: "global is valid", rotType: RotationTypeGlobal, want: true},
+		{name: "empty is invalid", rotType: RotationType(""), want: false},
+		{name: "per_user is invalid in M5", rotType: RotationType("per_user"), want: false},
+		{name: "uppercase GLOBAL is invalid", rotType: RotationType("GLOBAL"), want: false},
+		{name: "unknown is invalid", rotType: RotationType("unknown"), want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.rotType.IsValid(); got != tt.want {
+				t.Errorf("RotationType.IsValid() = %v, want %v for type %q", got, tt.want, tt.rotType)
+			}
+		})
+	}
+}
+
 func TestGoalStatus_IsValid(t *testing.T) {
 	tests := []struct {
 		name   string

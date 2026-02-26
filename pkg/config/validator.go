@@ -104,6 +104,11 @@ func (v *Validator) validateGoal(goal *domain.Goal) error {
 		return fmt.Errorf("invalid progressMode '%s' (must be 'absolute' or 'relative')", goal.Requirement.ProgressMode)
 	}
 
+	// Validate rotation config
+	if err := v.validateRotation(goal); err != nil {
+		return err
+	}
+
 	// Validate event source (required field)
 	if goal.EventSource == "" {
 		return errors.New("event_source cannot be empty")
@@ -132,6 +137,32 @@ func (v *Validator) validateGoal(goal *domain.Goal) error {
 	}
 	if goal.Reward.Quantity <= 0 {
 		return errors.New("reward quantity must be positive")
+	}
+
+	return nil
+}
+
+// validateRotation validates the optional rotation config on a goal.
+func (v *Validator) validateRotation(goal *domain.Goal) error {
+	if goal.Rotation == nil {
+		return nil
+	}
+
+	if !goal.Rotation.Enabled {
+		return nil
+	}
+
+	if !goal.Rotation.Type.IsValid() {
+		return fmt.Errorf("invalid rotation type '%s' (only 'global' supported in M5)", goal.Rotation.Type)
+	}
+
+	if !goal.Rotation.Schedule.IsValid() {
+		return fmt.Errorf("invalid rotation schedule '%s' (must be 'daily', 'weekly', or 'monthly')", goal.Rotation.Schedule)
+	}
+
+	// Rotation requires relative progress mode
+	if goal.Requirement.ProgressMode != domain.ProgressModeRelative {
+		return fmt.Errorf("rotation requires progressMode 'relative', got '%s'", goal.Requirement.ProgressMode)
 	}
 
 	return nil

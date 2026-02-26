@@ -396,19 +396,21 @@ func TestConfigLoader_countGoals(t *testing.T) {
 	loader := NewConfigLoader("/dummy/path", logger)
 
 	tests := []struct {
-		name     string
-		config   *Config
-		expected int
+		name             string
+		config           *Config
+		expectedTotal    int
+		expectedRotating int
 	}{
 		{
 			name: "no challenges",
 			config: &Config{
 				Challenges: []*domain.Challenge{},
 			},
-			expected: 0,
+			expectedTotal:    0,
+			expectedRotating: 0,
 		},
 		{
-			name: "single challenge with one goal",
+			name: "single challenge with one goal no rotation",
 			config: &Config{
 				Challenges: []*domain.Challenge{
 					{
@@ -418,36 +420,119 @@ func TestConfigLoader_countGoals(t *testing.T) {
 					},
 				},
 			},
-			expected: 1,
+			expectedTotal:    1,
+			expectedRotating: 0,
 		},
 		{
-			name: "multiple challenges with multiple goals",
+			name: "multiple challenges with mix of rotating goals",
 			config: &Config{
 				Challenges: []*domain.Challenge{
 					{
 						Goals: []*domain.Goal{
 							{ID: "goal-1"},
-							{ID: "goal-2"},
+							{ID: "goal-2", Rotation: &domain.RotationConfig{Enabled: true}},
 						},
 					},
 					{
 						Goals: []*domain.Goal{
-							{ID: "goal-3"},
+							{ID: "goal-3", Rotation: &domain.RotationConfig{Enabled: false}},
 						},
 					},
 				},
 			},
-			expected: 3,
+			expectedTotal:    3,
+			expectedRotating: 1,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := loader.countGoals(tt.config)
-			if result != tt.expected {
-				t.Errorf("countGoals() = %d, want %d", result, tt.expected)
+			total, rotating := loader.countGoals(tt.config)
+			if total != tt.expectedTotal {
+				t.Errorf("countGoals() total = %d, want %d", total, tt.expectedTotal)
+			}
+			if rotating != tt.expectedRotating {
+				t.Errorf("countGoals() rotating = %d, want %d", rotating, tt.expectedRotating)
 			}
 		})
+	}
+}
+
+func TestConfigLoader_Rotation_ParsedFromJSON(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	tmpFile := createTempConfigFile(t, `{
+		"challenges": [{
+			"challengeId": "c1", "name": "C1", "description": "D",
+			"goals": [{
+				"goalId": "g1", "name": "G1", "description": "D",
+				"eventSource": "statistic",
+				"requirement": {"statCode": "kills", "operator": ">=", "targetValue": 10, "progressMode": "relative"},
+				"reward": {"type": "ITEM", "rewardId": "item1", "quantity": 1},
+				"prerequisites": [],
+				"rotation": {
+					"enabled": true,
+					"type": "global",
+					"schedule": "daily",
+					"onExpiry": {"resetProgress": true, "allowReselection": true}
+				}
+			}]
+		}]
+	}`)
+	defer func() { _ = os.Remove(tmpFile) }()
+
+	loader := NewConfigLoader(tmpFile, logger)
+	cfg, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() unexpected error = %v", err)
+	}
+
+	goal := cfg.Challenges[0].Goals[0]
+	if goal.Rotation == nil {
+		t.Fatal("expected Rotation to be non-nil")
+	}
+	if !goal.Rotation.Enabled {
+		t.Error("expected Rotation.Enabled to be true")
+	}
+	if goal.Rotation.Type != domain.RotationTypeGlobal {
+		t.Errorf("Rotation.Type = %q, want %q", goal.Rotation.Type, domain.RotationTypeGlobal)
+	}
+	if goal.Rotation.Schedule != domain.RotationScheduleDaily {
+		t.Errorf("Rotation.Schedule = %q, want %q", goal.Rotation.Schedule, domain.RotationScheduleDaily)
+	}
+	if !goal.Rotation.OnExpiry.ResetProgress {
+		t.Error("expected OnExpiry.ResetProgress to be true")
+	}
+	if !goal.Rotation.OnExpiry.AllowReselection {
+		t.Error("expected OnExpiry.AllowReselection to be true")
+	}
+}
+
+func TestConfigLoader_Rotation_NilWhenAbsent(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	tmpFile := createTempConfigFile(t, `{
+		"challenges": [{
+			"challengeId": "c1", "name": "C1", "description": "D",
+			"goals": [{
+				"goalId": "g1", "name": "G1", "description": "D",
+				"eventSource": "statistic",
+				"requirement": {"statCode": "kills", "operator": ">=", "targetValue": 10},
+				"reward": {"type": "ITEM", "rewardId": "item1", "quantity": 1},
+				"prerequisites": []
+			}]
+		}]
+	}`)
+	defer func() { _ = os.Remove(tmpFile) }()
+
+	loader := NewConfigLoader(tmpFile, logger)
+	cfg, err := loader.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() unexpected error = %v", err)
+	}
+
+	if cfg.Challenges[0].Goals[0].Rotation != nil {
+		t.Error("expected Rotation to be nil when absent from JSON")
 	}
 }
 

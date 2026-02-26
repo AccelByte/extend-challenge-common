@@ -654,6 +654,150 @@ func TestValidator_Validate(t *testing.T) {
 	}
 }
 
+// validGoalWithRotation returns a minimal valid goal config with an optional rotation override.
+func validGoalWithRotation(rotation *domain.RotationConfig, progressMode domain.ProgressMode) *Config {
+	return &Config{
+		Challenges: []*domain.Challenge{
+			{
+				ID:   "challenge-1",
+				Name: "Challenge 1",
+				Goals: []*domain.Goal{
+					{
+						ID:          "goal-1",
+						Name:        "Goal 1",
+						EventSource: domain.EventSourceStatistic,
+						Requirement: domain.Requirement{
+							StatCode:     "stat_code",
+							Operator:     ">=",
+							TargetValue:  10,
+							ProgressMode: progressMode,
+						},
+						Reward: domain.Reward{
+							Type:     "ITEM",
+							RewardID: "item_1",
+							Quantity: 1,
+						},
+						Rotation: rotation,
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestValidator_Rotation(t *testing.T) {
+	tests := []struct {
+		name         string
+		rotation     *domain.RotationConfig
+		progressMode domain.ProgressMode
+		wantErr      bool
+		errMsg       string
+	}{
+		{
+			name:         "nil rotation is allowed",
+			rotation:     nil,
+			progressMode: domain.ProgressModeAbsolute,
+			wantErr:      false,
+		},
+		{
+			name: "disabled rotation is allowed",
+			rotation: &domain.RotationConfig{
+				Enabled: false,
+			},
+			progressMode: domain.ProgressModeAbsolute,
+			wantErr:      false,
+		},
+		{
+			name: "valid daily global rotation",
+			rotation: &domain.RotationConfig{
+				Enabled:  true,
+				Type:     domain.RotationTypeGlobal,
+				Schedule: domain.RotationScheduleDaily,
+				OnExpiry: domain.OnExpiryConfig{ResetProgress: true, AllowReselection: true},
+			},
+			progressMode: domain.ProgressModeRelative,
+			wantErr:      false,
+		},
+		{
+			name: "valid weekly global rotation",
+			rotation: &domain.RotationConfig{
+				Enabled:  true,
+				Type:     domain.RotationTypeGlobal,
+				Schedule: domain.RotationScheduleWeekly,
+				OnExpiry: domain.OnExpiryConfig{ResetProgress: true, AllowReselection: false},
+			},
+			progressMode: domain.ProgressModeRelative,
+			wantErr:      false,
+		},
+		{
+			name: "valid monthly global rotation",
+			rotation: &domain.RotationConfig{
+				Enabled:  true,
+				Type:     domain.RotationTypeGlobal,
+				Schedule: domain.RotationScheduleMonthly,
+				OnExpiry: domain.OnExpiryConfig{ResetProgress: false, AllowReselection: true},
+			},
+			progressMode: domain.ProgressModeRelative,
+			wantErr:      false,
+		},
+		{
+			name: "invalid schedule rejected",
+			rotation: &domain.RotationConfig{
+				Enabled:  true,
+				Type:     domain.RotationTypeGlobal,
+				Schedule: domain.RotationSchedule("hourly"),
+			},
+			progressMode: domain.ProgressModeRelative,
+			wantErr:      true,
+			errMsg:       "invalid rotation schedule 'hourly'",
+		},
+		{
+			name: "invalid type rejected",
+			rotation: &domain.RotationConfig{
+				Enabled:  true,
+				Type:     domain.RotationType("per_user"),
+				Schedule: domain.RotationScheduleDaily,
+			},
+			progressMode: domain.ProgressModeRelative,
+			wantErr:      true,
+			errMsg:       "invalid rotation type 'per_user'",
+		},
+		{
+			name: "absolute with rotation rejected",
+			rotation: &domain.RotationConfig{
+				Enabled:  true,
+				Type:     domain.RotationTypeGlobal,
+				Schedule: domain.RotationScheduleDaily,
+			},
+			progressMode: domain.ProgressModeAbsolute,
+			wantErr:      true,
+			errMsg:       "rotation requires progressMode 'relative', got 'absolute'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := validGoalWithRotation(tt.rotation, tt.progressMode)
+			v := NewValidator()
+			err := v.Validate(config)
+
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("Validate() expected error, got nil")
+					return
+				}
+				if !strings.Contains(err.Error(), tt.errMsg) {
+					t.Errorf("Validate() error = %v, want error containing %q", err, tt.errMsg)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Validate() unexpected error = %v", err)
+				}
+			}
+		})
+	}
+}
+
 func TestValidator_ProgressMode_Invalid(t *testing.T) {
 	tests := []struct {
 		name   string

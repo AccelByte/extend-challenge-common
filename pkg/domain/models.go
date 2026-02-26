@@ -39,15 +39,68 @@ func (e EventSource) IsValid() bool {
 // Goal represents a single objective that users can complete to earn rewards.
 // Goals track progress via stat codes from AGS events.
 type Goal struct {
-	ID              string      `json:"goalId"`
-	Name            string      `json:"name"`
-	Description     string      `json:"description"`
-	ChallengeID     string      `json:"challengeId"`     // Parent challenge ID
-	EventSource     EventSource `json:"eventSource"`     // Which event stream triggers this goal (login, statistic)
-	DefaultAssigned bool        `json:"defaultAssigned"` // M3: Whether goal is assigned by default to new players
-	Requirement     Requirement `json:"requirement"`
-	Reward          Reward      `json:"reward"`
-	Prerequisites   []string    `json:"prerequisites"` // Goal IDs that must be completed first
+	ID              string          `json:"goalId"`
+	Name            string          `json:"name"`
+	Description     string          `json:"description"`
+	ChallengeID     string          `json:"challengeId"`     // Parent challenge ID
+	EventSource     EventSource     `json:"eventSource"`     // Which event stream triggers this goal (login, statistic)
+	DefaultAssigned bool            `json:"defaultAssigned"` // M3: Whether goal is assigned by default to new players
+	Requirement     Requirement     `json:"requirement"`
+	Reward          Reward          `json:"reward"`
+	Prerequisites   []string        `json:"prerequisites"`      // Goal IDs that must be completed first
+	Rotation        *RotationConfig `json:"rotation,omitempty"` // M5: Optional rotation config
+}
+
+// RotationSchedule defines predefined rotation schedule types.
+type RotationSchedule string
+
+const (
+	RotationScheduleDaily   RotationSchedule = "daily"
+	RotationScheduleWeekly  RotationSchedule = "weekly"
+	RotationScheduleMonthly RotationSchedule = "monthly"
+)
+
+// IsValid returns true if the rotation schedule is a valid type.
+func (s RotationSchedule) IsValid() bool {
+	switch s {
+	case RotationScheduleDaily, RotationScheduleWeekly, RotationScheduleMonthly:
+		return true
+	default:
+		return false
+	}
+}
+
+// RotationType defines the type of rotation scheduling.
+type RotationType string
+
+const (
+	// RotationTypeGlobal means all users share the same schedule boundaries.
+	RotationTypeGlobal RotationType = "global"
+	// RotationTypePerUser is deferred to M6.
+)
+
+// IsValid returns true if the rotation type is a valid type.
+func (t RotationType) IsValid() bool {
+	switch t {
+	case RotationTypeGlobal:
+		return true
+	default:
+		return false
+	}
+}
+
+// OnExpiryConfig defines what happens when a rotation boundary is crossed.
+type OnExpiryConfig struct {
+	ResetProgress    bool `json:"resetProgress"`
+	AllowReselection bool `json:"allowReselection"`
+}
+
+// RotationConfig defines the rotation settings for a goal.
+type RotationConfig struct {
+	Enabled  bool             `json:"enabled"`
+	Type     RotationType     `json:"type"`
+	Schedule RotationSchedule `json:"schedule"`
+	OnExpiry OnExpiryConfig   `json:"onExpiry"`
 }
 
 // ProgressMode defines how progress is tracked for a goal's requirement.

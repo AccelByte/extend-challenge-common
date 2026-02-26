@@ -74,21 +74,26 @@ func (l *ConfigLoader) LoadConfig() (*Config, error) {
 	}
 
 	// Log success
-	totalGoals := l.countGoals(&config)
+	totalGoals, rotatingGoals := l.countGoals(&config)
 	l.logger.Info("Config loaded successfully",
 		"challenges", len(config.Challenges),
 		"total_goals", totalGoals,
+		"rotating_goals", rotatingGoals,
 		"config_path", l.configPath,
 	)
 
 	return &config, nil
 }
 
-// countGoals counts the total number of goals across all challenges.
-func (l *ConfigLoader) countGoals(config *Config) int {
-	count := 0
+// countGoals counts the total number of goals and rotating goals across all challenges.
+func (l *ConfigLoader) countGoals(config *Config) (total int, rotating int) {
 	for _, challenge := range config.Challenges {
-		count += len(challenge.Goals)
+		for _, goal := range challenge.Goals {
+			total++
+			if goal.Rotation != nil && goal.Rotation.Enabled {
+				rotating++
+			}
+		}
 	}
-	return count
+	return total, rotating
 }

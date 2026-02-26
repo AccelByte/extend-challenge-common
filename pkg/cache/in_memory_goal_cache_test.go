@@ -431,6 +431,105 @@ func createTempConfigFile(t *testing.T, content string) string {
 	return tmpFile
 }
 
+// M5: Test that cached goals retain rotation config
+func TestInMemoryGoalCache_GoalWithRotation(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	cfg := &config.Config{
+		Challenges: []*domain.Challenge{
+			{
+				ID:          "challenge-rot",
+				Name:        "Rotating Challenge",
+				Description: "Description",
+				Goals: []*domain.Goal{
+					{
+						ID:          "goal-rotating",
+						Name:        "Daily Kill Goal",
+						Description: "Get 10 kills today",
+						ChallengeID: "challenge-rot",
+						EventSource: domain.EventSourceStatistic,
+						Requirement: domain.Requirement{
+							StatCode:     "kills",
+							Operator:     ">=",
+							TargetValue:  10,
+							ProgressMode: domain.ProgressModeRelative,
+						},
+						Reward: domain.Reward{
+							Type:     "ITEM",
+							RewardID: "item_1",
+							Quantity: 1,
+						},
+						Rotation: &domain.RotationConfig{
+							Enabled:  true,
+							Type:     domain.RotationTypeGlobal,
+							Schedule: domain.RotationScheduleDaily,
+							OnExpiry: domain.OnExpiryConfig{
+								ResetProgress:    true,
+								AllowReselection: true,
+							},
+						},
+					},
+					{
+						ID:          "goal-no-rotation",
+						Name:        "Static Goal",
+						Description: "No rotation",
+						ChallengeID: "challenge-rot",
+						EventSource: domain.EventSourceStatistic,
+						Requirement: domain.Requirement{
+							StatCode:     "kills",
+							Operator:     ">=",
+							TargetValue:  100,
+							ProgressMode: domain.ProgressModeAbsolute,
+						},
+						Reward: domain.Reward{
+							Type:     "ITEM",
+							RewardID: "item_2",
+							Quantity: 1,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	cache := NewInMemoryGoalCache(cfg, "/path/to/config.json", logger)
+
+	t.Run("rotating goal retains rotation config", func(t *testing.T) {
+		goal := cache.GetGoalByID("goal-rotating")
+		if goal == nil {
+			t.Fatal("expected goal-rotating to exist")
+		}
+		if goal.Rotation == nil {
+			t.Fatal("expected Rotation to be non-nil")
+		}
+		if !goal.Rotation.Enabled {
+			t.Error("expected Rotation.Enabled to be true")
+		}
+		if goal.Rotation.Type != domain.RotationTypeGlobal {
+			t.Errorf("Rotation.Type = %q, want %q", goal.Rotation.Type, domain.RotationTypeGlobal)
+		}
+		if goal.Rotation.Schedule != domain.RotationScheduleDaily {
+			t.Errorf("Rotation.Schedule = %q, want %q", goal.Rotation.Schedule, domain.RotationScheduleDaily)
+		}
+		if !goal.Rotation.OnExpiry.ResetProgress {
+			t.Error("expected OnExpiry.ResetProgress to be true")
+		}
+		if !goal.Rotation.OnExpiry.AllowReselection {
+			t.Error("expected OnExpiry.AllowReselection to be true")
+		}
+	})
+
+	t.Run("non-rotating goal has nil rotation", func(t *testing.T) {
+		goal := cache.GetGoalByID("goal-no-rotation")
+		if goal == nil {
+			t.Fatal("expected goal-no-rotation to exist")
+		}
+		if goal.Rotation != nil {
+			t.Error("expected Rotation to be nil for non-rotating goal")
+		}
+	})
+}
+
 // M3: Test GetGoalsWithDefaultAssigned method
 func TestInMemoryGoalCache_GetGoalsWithDefaultAssigned(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
