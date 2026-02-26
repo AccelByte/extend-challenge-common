@@ -309,7 +309,7 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY_EmptyBatch(t *testing.
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	err = tx.BatchUpsertProgressWithCOPY(ctx, []*domain.UserGoalProgress{})
+	err = tx.BatchUpsertProgressWithCOPY(ctx, []CopyRow{})
 	if err != nil {
 		t.Fatalf("BatchUpsertProgressWithCOPY with empty batch failed: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY_NilBatch(t *testing.T)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	err = tx.BatchUpsertProgressWithCOPY(ctx, nil)
+	err = tx.BatchUpsertProgressWithCOPY(ctx, []CopyRow(nil))
 	if err != nil {
 		t.Fatalf("BatchUpsertProgressWithCOPY with nil batch failed: %v", err)
 	}
@@ -343,20 +343,34 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY_SingleItem(t *testing.
 	repo := NewPostgresGoalRepository(db)
 	ctx := context.Background()
 
+	// First create the row so BatchUpsertProgressWithCOPY (UPDATE-only) can update it
+	initial := &domain.UserGoalProgress{
+		UserID:      "copy-single-user",
+		GoalID:      "copy-single-goal",
+		ChallengeID: "copy-single-challenge",
+		Namespace:   "test",
+		Progress:    0,
+		Status:      domain.GoalStatusNotStarted,
+		IsActive:    true,
+	}
+	if err := repo.UpsertProgress(ctx, initial); err != nil {
+		t.Fatalf("Setup UpsertProgress failed: %v", err)
+	}
+
 	tx, err := repo.BeginTx(ctx)
 	if err != nil {
 		t.Fatalf("BeginTx failed: %v", err)
 	}
 
-	batch := []*domain.UserGoalProgress{
+	batch := []CopyRow{
 		{
-			UserID:      "copy-single-user",
-			GoalID:      "copy-single-goal",
-			ChallengeID: "copy-single-challenge",
-			Namespace:   "test",
-			Progress:    15,
-			Status:      domain.GoalStatusInProgress,
-			IsActive:    true,
+			UserID:       "copy-single-user",
+			GoalID:       "copy-single-goal",
+			ChallengeID:  "copy-single-challenge",
+			Namespace:    "test",
+			Progress:     intPtr(15),
+			ProgressMode: "absolute",
+			TargetValue:  20,
 		},
 	}
 
@@ -557,7 +571,7 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY_EmptyBatch(t *testin
 	repo := NewPostgresGoalRepository(db)
 	ctx := context.Background()
 
-	err := repo.BatchUpsertProgressWithCOPY(ctx, []*domain.UserGoalProgress{})
+	err := repo.BatchUpsertProgressWithCOPY(ctx, []CopyRow{})
 	if err != nil {
 		t.Fatalf("BatchUpsertProgressWithCOPY with empty batch failed: %v", err)
 	}

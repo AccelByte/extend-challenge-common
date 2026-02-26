@@ -89,6 +89,19 @@ type StatUpdate struct {
 	Inc   int  // Incremental change (always >= 1)
 }
 
+// BufferedEvent represents a buffered progress event before flush.
+// Used by the unified COPY path (M5 Phase 2) to carry both absolute and increment events
+// through a single buffer and single flush path.
+type BufferedEvent struct {
+	UserID       string       // User ID
+	GoalID       string       // Goal ID
+	ChallengeID  string       // Challenge ID
+	Namespace    string       // Namespace
+	Progress     *int         // Absolute stat value (nil for login events)
+	IncValue     int          // Increment delta; always >= 1
+	ProgressMode ProgressMode // "absolute" or "relative"
+}
+
 // Requirement defines the condition that must be met to complete a goal.
 type Requirement struct {
 	StatCode     string       `json:"statCode"`               // Event field to track (e.g., "snowman_kills")

@@ -475,30 +475,33 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// Now update records using BatchUpsertProgressWithCOPY
-		updates := []*domain.UserGoalProgress{
+		updates := []CopyRow{
 			{
-				UserID:      "copy-user1",
-				GoalID:      "copy-goal1",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    5,
-				Status:      domain.GoalStatusInProgress,
+				UserID:       "copy-user1",
+				GoalID:       "copy-goal1",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(5),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 			{
-				UserID:      "copy-user1",
-				GoalID:      "copy-goal2",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    10,
-				Status:      domain.GoalStatusCompleted,
+				UserID:       "copy-user1",
+				GoalID:       "copy-goal2",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(10),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 			{
-				UserID:      "copy-user2",
-				GoalID:      "copy-goal1",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    3,
-				Status:      domain.GoalStatusInProgress,
+				UserID:       "copy-user2",
+				GoalID:       "copy-goal1",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(3),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 
@@ -552,22 +555,24 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// Update records using COPY
-		updates := []*domain.UserGoalProgress{
+		updates := []CopyRow{
 			{
-				UserID:      "copy-user3",
-				GoalID:      "copy-goal1",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    5,
-				Status:      domain.GoalStatusInProgress,
+				UserID:       "copy-user3",
+				GoalID:       "copy-goal1",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(5),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 			{
-				UserID:      "copy-user3",
-				GoalID:      "copy-goal2",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    10,
-				Status:      domain.GoalStatusCompleted,
+				UserID:       "copy-user3",
+				GoalID:       "copy-goal2",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(10),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
@@ -588,7 +593,7 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 	})
 
 	t.Run("empty batch does nothing with COPY", func(t *testing.T) {
-		err := repo.BatchUpsertProgressWithCOPY(ctx, []*domain.UserGoalProgress{})
+		err := repo.BatchUpsertProgressWithCOPY(ctx, []CopyRow{})
 		if err != nil {
 			t.Fatalf("Empty BatchUpsertProgressWithCOPY should not error: %v", err)
 		}
@@ -621,14 +626,15 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// Try to update the claimed goal
-		updates := []*domain.UserGoalProgress{
+		updates := []CopyRow{
 			{
-				UserID:      "copy-user4",
-				GoalID:      "copy-goal1",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    20, // Try to change progress
-				Status:      domain.GoalStatusInProgress,
+				UserID:       "copy-user4",
+				GoalID:       "copy-goal1",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(20), // Try to change progress
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
@@ -666,14 +672,15 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// 2. Simulate event update (progress = 10)
-		updates := []*domain.UserGoalProgress{
+		updates := []CopyRow{
 			{
-				UserID:      "m3-user1",
-				GoalID:      "m3-goal1",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    10,
-				Status:      domain.GoalStatusCompleted,
+				UserID:       "m3-user1",
+				GoalID:       "m3-goal1",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(10),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
@@ -713,14 +720,15 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// 2. Simulate event update (progress = 10)
-		updates := []*domain.UserGoalProgress{
+		updates := []CopyRow{
 			{
-				UserID:      "m3-user2",
-				GoalID:      "m3-goal2",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    10,
-				Status:      domain.GoalStatusCompleted,
+				UserID:       "m3-user2",
+				GoalID:       "m3-goal2",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(10),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 		err = repo.BatchUpsertProgressWithCOPY(ctx, updates)
@@ -760,14 +768,15 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// 2. Event updates assigned goal
-		updates1 := []*domain.UserGoalProgress{
+		updates1 := []CopyRow{
 			{
-				UserID:      "m3-user3",
-				GoalID:      "m3-goal3",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    5,
-				Status:      domain.GoalStatusInProgress,
+				UserID:       "m3-user3",
+				GoalID:       "m3-goal3",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(5),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 		err = repo.BatchUpsertProgressWithCOPY(ctx, updates1)
@@ -794,14 +803,15 @@ func TestPostgresGoalRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 		}
 
 		// 4. Event should NOT update unassigned goal
-		updates2 := []*domain.UserGoalProgress{
+		updates2 := []CopyRow{
 			{
-				UserID:      "m3-user3",
-				GoalID:      "m3-goal3",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    10,
-				Status:      domain.GoalStatusCompleted,
+				UserID:       "m3-user3",
+				GoalID:       "m3-goal3",
+				ChallengeID:  "challenge1",
+				Namespace:    "test",
+				Progress:     intPtr(10),
+				ProgressMode: "absolute",
+				TargetValue:  10,
 			},
 		}
 		err = repo.BatchUpsertProgressWithCOPY(ctx, updates2)
@@ -1287,965 +1297,6 @@ func TestPostgresGoalRepository_Transaction(t *testing.T) {
 		_, err = tx.BeginTx(ctx)
 		if err == nil {
 			t.Error("Expected error when starting nested transaction")
-		}
-	})
-}
-
-func TestPostgresGoalRepository_IncrementProgress(t *testing.T) {
-	db := setupTestDB(t)
-	if db == nil {
-		return
-	}
-	defer cleanupTestDB(t, db)
-
-	repo := NewPostgresGoalRepository(db)
-	ctx := context.Background()
-
-	t.Run("regular increment - basic increment (delta=1)", func(t *testing.T) {
-		// M3 Phase 9: IncrementProgress is UPDATE-only (lazy materialization)
-		// First create record using BulkInsert (simulates initialization)
-		initial := []*domain.UserGoalProgress{
-			{
-				UserID:      "user1",
-				GoalID:      "goal1",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    0,
-				Status:      domain.GoalStatusNotStarted,
-				IsActive:    true,
-			},
-		}
-		err := repo.BulkInsert(ctx, initial)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		err = repo.IncrementProgress(ctx, "user1", "goal1", "challenge1", "test", 1, 10, false)
-		if err != nil {
-			t.Fatalf("IncrementProgress failed: %v", err)
-		}
-
-		progress, _ := repo.GetProgress(ctx, "user1", "goal1")
-		if progress == nil {
-			t.Fatal("Expected progress to exist")
-		}
-		if progress.Progress != 1 {
-			t.Errorf("Progress = %d, want 1", progress.Progress)
-		}
-		if progress.Status != domain.GoalStatusInProgress {
-			t.Errorf("Status = %s, want %s", progress.Status, domain.GoalStatusInProgress)
-		}
-	})
-
-	t.Run("regular increment - accumulated delta (delta=5)", func(t *testing.T) {
-		// M3 Phase 9: First create record (simulates initialization)
-		initial := []*domain.UserGoalProgress{
-			{
-				UserID:      "user2",
-				GoalID:      "goal2",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    0,
-				Status:      domain.GoalStatusNotStarted,
-				IsActive:    true,
-			},
-		}
-		err := repo.BulkInsert(ctx, initial)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// First increment by 3
-		err = repo.IncrementProgress(ctx, "user2", "goal2", "challenge1", "test", 3, 10, false)
-		if err != nil {
-			t.Fatalf("First IncrementProgress failed: %v", err)
-		}
-
-		// Second increment by 5
-		err = repo.IncrementProgress(ctx, "user2", "goal2", "challenge1", "test", 5, 10, false)
-		if err != nil {
-			t.Fatalf("Second IncrementProgress failed: %v", err)
-		}
-
-		progress, _ := repo.GetProgress(ctx, "user2", "goal2")
-		if progress.Progress != 8 {
-			t.Errorf("Progress = %d, want 8 (3+5)", progress.Progress)
-		}
-	})
-
-	t.Run("regular increment - zero delta (no-op)", func(t *testing.T) {
-		// M3 Phase 9: First create record (simulates initialization)
-		initial := []*domain.UserGoalProgress{
-			{
-				UserID:      "user3",
-				GoalID:      "goal3",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    0,
-				Status:      domain.GoalStatusNotStarted,
-				IsActive:    true,
-			},
-		}
-		err := repo.BulkInsert(ctx, initial)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// Initial increment
-		err = repo.IncrementProgress(ctx, "user3", "goal3", "challenge1", "test", 5, 10, false)
-		if err != nil {
-			t.Fatalf("Initial IncrementProgress failed: %v", err)
-		}
-
-		// Zero delta
-		err = repo.IncrementProgress(ctx, "user3", "goal3", "challenge1", "test", 0, 10, false)
-		if err != nil {
-			t.Fatalf("Zero delta IncrementProgress failed: %v", err)
-		}
-
-		progress, _ := repo.GetProgress(ctx, "user3", "goal3")
-		if progress.Progress != 5 {
-			t.Errorf("Progress = %d, want 5 (unchanged)", progress.Progress)
-		}
-	})
-
-	t.Run("regular increment - overflow beyond target", func(t *testing.T) {
-		// M3 Phase 9: First create record (simulates initialization)
-		initial := []*domain.UserGoalProgress{
-			{
-				UserID:      "user4",
-				GoalID:      "goal4",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    0,
-				Status:      domain.GoalStatusNotStarted,
-				IsActive:    true,
-			},
-		}
-		err := repo.BulkInsert(ctx, initial)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// Initial progress
-		err = repo.IncrementProgress(ctx, "user4", "goal4", "challenge1", "test", 4, 5, false)
-		if err != nil {
-			t.Fatalf("Initial IncrementProgress failed: %v", err)
-		}
-
-		// Increment beyond target (4 + 100 = 104 > 5)
-		err = repo.IncrementProgress(ctx, "user4", "goal4", "challenge1", "test", 100, 5, false)
-		if err != nil {
-			t.Fatalf("Overflow IncrementProgress failed: %v", err)
-		}
-
-		progress, _ := repo.GetProgress(ctx, "user4", "goal4")
-		if progress.Progress != 104 {
-			t.Errorf("Progress = %d, want 104 (allows overflow)", progress.Progress)
-		}
-		if progress.Status != domain.GoalStatusCompleted {
-			t.Errorf("Status = %s, want completed", progress.Status)
-		}
-	})
-
-	t.Run("regular increment - status transition to completed at threshold", func(t *testing.T) {
-		// M3 Phase 9: First create record (simulates initialization)
-		initial := []*domain.UserGoalProgress{
-			{
-				UserID:      "user5",
-				GoalID:      "goal5",
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    0,
-				Status:      domain.GoalStatusNotStarted,
-				IsActive:    true,
-			},
-		}
-		err := repo.BulkInsert(ctx, initial)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// Start at 8, target 10
-		err = repo.IncrementProgress(ctx, "user5", "goal5", "challenge1", "test", 8, 10, false)
-		if err != nil {
-			t.Fatalf("Initial IncrementProgress failed: %v", err)
-		}
-
-		progress, _ := repo.GetProgress(ctx, "user5", "goal5")
-		if progress.Status != domain.GoalStatusInProgress {
-			t.Errorf("Initial status = %s, want in_progress", progress.Status)
-		}
-
-		// Increment by 2 to reach target (8 + 2 = 10)
-		err = repo.IncrementProgress(ctx, "user5", "goal5", "challenge1", "test", 2, 10, false)
-		if err != nil {
-			t.Fatalf("Final IncrementProgress failed: %v", err)
-		}
-
-		progress, _ = repo.GetProgress(ctx, "user5", "goal5")
-		if progress.Progress != 10 {
-			t.Errorf("Progress = %d, want 10", progress.Progress)
-		}
-		if progress.Status != domain.GoalStatusCompleted {
-			t.Errorf("Status = %s, want completed", progress.Status)
-		}
-		if progress.CompletedAt == nil {
-			t.Error("CompletedAt should be set when status becomes completed")
-		}
-	})
-
-	t.Run("daily increment - first day increment", func(t *testing.T) {
-		// M3 Phase 9: First create record with yesterday's timestamp (simulates previous day initialization)
-		// Direct SQL insert with custom updated_at to test daily increment behavior
-		yesterday := time.Now().UTC().Add(-24 * time.Hour)
-		_, err := db.ExecContext(ctx, `
-			INSERT INTO user_goal_progress (
-				user_id, goal_id, challenge_id, namespace,
-				progress, status, created_at, updated_at, is_active
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, "user6", "goal6", "challenge1", "test", 0, domain.GoalStatusNotStarted, yesterday, yesterday, true)
-		if err != nil {
-			t.Fatalf("Direct insert failed: %v", err)
-		}
-
-		err = repo.IncrementProgress(ctx, "user6", "goal6", "challenge1", "test", 1, 7, true)
-		if err != nil {
-			t.Fatalf("First day IncrementProgress failed: %v", err)
-		}
-
-		progress, _ := repo.GetProgress(ctx, "user6", "goal6")
-		if progress.Progress != 1 {
-			t.Errorf("Progress = %d, want 1", progress.Progress)
-		}
-	})
-
-	t.Run("daily increment - same day no-op (progress unchanged)", func(t *testing.T) {
-		// M3 Phase 9: First create record with yesterday's timestamp
-		yesterday := time.Now().UTC().Add(-24 * time.Hour)
-		_, err := db.ExecContext(ctx, `
-			INSERT INTO user_goal_progress (
-				user_id, goal_id, challenge_id, namespace,
-				progress, status, created_at, updated_at, is_active
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, "user7", "goal7", "challenge1", "test", 0, domain.GoalStatusNotStarted, yesterday, yesterday, true)
-		if err != nil {
-			t.Fatalf("Direct insert failed: %v", err)
-		}
-
-		// First increment today
-		err = repo.IncrementProgress(ctx, "user7", "goal7", "challenge1", "test", 1, 7, true)
-		if err != nil {
-			t.Fatalf("First increment failed: %v", err)
-		}
-
-		progress1, _ := repo.GetProgress(ctx, "user7", "goal7")
-		time1 := progress1.UpdatedAt
-
-		// Second increment same day (should be no-op)
-		time.Sleep(10 * time.Millisecond) // Small delay to ensure timestamp would change if updated
-		err = repo.IncrementProgress(ctx, "user7", "goal7", "challenge1", "test", 1, 7, true)
-		if err != nil {
-			t.Fatalf("Second increment failed: %v", err)
-		}
-
-		progress2, _ := repo.GetProgress(ctx, "user7", "goal7")
-		if progress2.Progress != 1 {
-			t.Errorf("Progress = %d, want 1 (unchanged)", progress2.Progress)
-		}
-		// Note: updated_at will change even if progress doesn't (by design - tracks last attempt)
-		if !progress2.UpdatedAt.After(time1) {
-			t.Error("UpdatedAt should be updated even for same-day no-op")
-		}
-	})
-
-	t.Run("claimed protection - no update when status=claimed", func(t *testing.T) {
-		// Insert and claim progress
-		completedTime := time.Now()
-		claimedTime := time.Now()
-		progress := &domain.UserGoalProgress{
-			UserID:      "user8",
-			GoalID:      "goal8",
-			ChallengeID: "challenge1",
-			Namespace:   "test",
-			Progress:    10,
-			Status:      domain.GoalStatusClaimed,
-			CompletedAt: &completedTime,
-			ClaimedAt:   &claimedTime,
-		}
-		err := repo.UpsertProgress(ctx, progress)
-		if err != nil {
-			t.Fatalf("Initial UpsertProgress failed: %v", err)
-		}
-
-		// Try to increment claimed goal
-		err = repo.IncrementProgress(ctx, "user8", "goal8", "challenge1", "test", 5, 10, false)
-		if err != nil {
-			t.Fatalf("IncrementProgress on claimed goal failed: %v", err)
-		}
-
-		// Verify it was NOT updated (progress still 10)
-		retrieved, _ := repo.GetProgress(ctx, "user8", "goal8")
-		if retrieved.Progress != 10 {
-			t.Errorf("Progress = %d, want 10 (should not have been updated)", retrieved.Progress)
-		}
-		if retrieved.Status != domain.GoalStatusClaimed {
-			t.Errorf("Status = %s, want claimed", retrieved.Status)
-		}
-	})
-}
-
-func TestPostgresGoalRepository_BatchIncrementProgress(t *testing.T) {
-	db := setupTestDB(t)
-	if db == nil {
-		return
-	}
-	defer cleanupTestDB(t, db)
-
-	repo := NewPostgresGoalRepository(db)
-	ctx := context.Background()
-
-	t.Run("batch increment - empty slice (no-op)", func(t *testing.T) {
-		err := repo.BatchIncrementProgress(ctx, []ProgressIncrement{})
-		if err != nil {
-			t.Fatalf("Empty BatchIncrementProgress should not error: %v", err)
-		}
-	})
-
-	t.Run("batch increment - mixed regular and daily increments", func(t *testing.T) {
-		// M3 Phase 9: First create records (simulates initialization)
-		initial := []*domain.UserGoalProgress{
-			{UserID: "user1", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-			{UserID: "user1", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-			{UserID: "user2", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-		}
-		err := repo.BulkInsert(ctx, initial)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// For daily increments, insert with yesterday's timestamp
-		yesterday := time.Now().UTC().Add(-24 * time.Hour)
-		_, err = db.ExecContext(ctx, `
-			INSERT INTO user_goal_progress (
-				user_id, goal_id, challenge_id, namespace,
-				progress, status, created_at, updated_at, is_active
-			) VALUES
-				($1, $2, $3, $4, $5, $6, $7, $8, $9),
-				($10, $11, $12, $13, $14, $15, $16, $17, $18)
-		`, "user3", "goal3", "challenge1", "test", 0, domain.GoalStatusNotStarted, yesterday, yesterday, true,
-			"user3", "goal4", "challenge1", "test", 0, domain.GoalStatusNotStarted, yesterday, yesterday, true)
-		if err != nil {
-			t.Fatalf("Direct insert for daily goals failed: %v", err)
-		}
-
-		increments := []ProgressIncrement{
-			// Regular increments
-			{UserID: "user1", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 1, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "user1", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 5, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "user2", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 3, TargetValue: 5, IsDailyIncrement: false},
-			// Daily increments
-			{UserID: "user3", GoalID: "goal3", ChallengeID: "challenge1", Namespace: "test", Delta: 1, TargetValue: 7, IsDailyIncrement: true},
-			{UserID: "user3", GoalID: "goal4", ChallengeID: "challenge1", Namespace: "test", Delta: 1, TargetValue: 7, IsDailyIncrement: true},
-		}
-
-		err = repo.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("BatchIncrementProgress failed: %v", err)
-		}
-
-		// Verify regular increments
-		p1, _ := repo.GetProgress(ctx, "user1", "goal1")
-		if p1 == nil || p1.Progress != 1 {
-			t.Error("user1/goal1 not incremented correctly")
-		}
-
-		p2, _ := repo.GetProgress(ctx, "user1", "goal2")
-		if p2 == nil || p2.Progress != 5 {
-			t.Error("user1/goal2 not incremented correctly")
-		}
-
-		p3, _ := repo.GetProgress(ctx, "user2", "goal1")
-		if p3 == nil || p3.Progress != 3 {
-			t.Error("user2/goal1 not incremented correctly")
-		}
-
-		// Verify daily increments
-		p4, _ := repo.GetProgress(ctx, "user3", "goal3")
-		if p4 == nil || p4.Progress != 1 {
-			t.Error("user3/goal3 (daily) not incremented correctly")
-		}
-
-		p5, _ := repo.GetProgress(ctx, "user3", "goal4")
-		if p5 == nil || p5.Progress != 1 {
-			t.Error("user3/goal4 (daily) not incremented correctly")
-		}
-	})
-
-	t.Run("batch increment - accumulation on existing progress", func(t *testing.T) {
-		// M3 Phase 9: First create records (simulates initialization)
-		initialRecords := []*domain.UserGoalProgress{
-			{UserID: "user4", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-			{UserID: "user4", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-		}
-		err := repo.BulkInsert(ctx, initialRecords)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// Initial increments
-		initial := []ProgressIncrement{
-			{UserID: "user4", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 3, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "user4", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 2, TargetValue: 10, IsDailyIncrement: false},
-		}
-		err = repo.BatchIncrementProgress(ctx, initial)
-		if err != nil {
-			t.Fatalf("Initial BatchIncrementProgress failed: %v", err)
-		}
-
-		// Additional increments
-		additional := []ProgressIncrement{
-			{UserID: "user4", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 5, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "user4", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 4, TargetValue: 10, IsDailyIncrement: false},
-		}
-		err = repo.BatchIncrementProgress(ctx, additional)
-		if err != nil {
-			t.Fatalf("Additional BatchIncrementProgress failed: %v", err)
-		}
-
-		// Verify accumulation
-		p1, _ := repo.GetProgress(ctx, "user4", "goal1")
-		if p1.Progress != 8 {
-			t.Errorf("user4/goal1 progress = %d, want 8 (3+5)", p1.Progress)
-		}
-
-		p2, _ := repo.GetProgress(ctx, "user4", "goal2")
-		if p2.Progress != 6 {
-			t.Errorf("user4/goal2 progress = %d, want 6 (2+4)", p2.Progress)
-		}
-	})
-
-	t.Run("batch increment - status transitions to completed", func(t *testing.T) {
-		// M3 Phase 9: First create records (simulates initialization)
-		initialRecords := []*domain.UserGoalProgress{
-			{UserID: "user5", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-			{UserID: "user5", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Progress: 0, Status: domain.GoalStatusNotStarted, IsActive: true},
-		}
-		err := repo.BulkInsert(ctx, initialRecords)
-		if err != nil {
-			t.Fatalf("BulkInsert failed: %v", err)
-		}
-
-		// Start with progress near target
-		initial := []ProgressIncrement{
-			{UserID: "user5", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 8, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "user5", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 3, TargetValue: 5, IsDailyIncrement: false},
-		}
-		err = repo.BatchIncrementProgress(ctx, initial)
-		if err != nil {
-			t.Fatalf("Initial BatchIncrementProgress failed: %v", err)
-		}
-
-		// Increment to complete both goals
-		completing := []ProgressIncrement{
-			{UserID: "user5", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 2, TargetValue: 10, IsDailyIncrement: false}, // 8+2=10
-			{UserID: "user5", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 5, TargetValue: 5, IsDailyIncrement: false},  // 3+5=8>5
-		}
-		err = repo.BatchIncrementProgress(ctx, completing)
-		if err != nil {
-			t.Fatalf("Completing BatchIncrementProgress failed: %v", err)
-		}
-
-		// Verify both are completed
-		p1, _ := repo.GetProgress(ctx, "user5", "goal1")
-		if p1.Status != domain.GoalStatusCompleted {
-			t.Errorf("user5/goal1 status = %s, want completed", p1.Status)
-		}
-		if p1.CompletedAt == nil {
-			t.Error("user5/goal1 should have completed_at set")
-		}
-
-		p2, _ := repo.GetProgress(ctx, "user5", "goal2")
-		if p2.Status != domain.GoalStatusCompleted {
-			t.Errorf("user5/goal2 status = %s, want completed", p2.Status)
-		}
-		if p2.CompletedAt == nil {
-			t.Error("user5/goal2 should have completed_at set")
-		}
-	})
-
-	t.Run("batch increment - daily increment same day no-op", func(t *testing.T) {
-		// M3 Phase 9: Create record with yesterday's timestamp
-		yesterday := time.Now().UTC().Add(-24 * time.Hour)
-		_, err := db.ExecContext(ctx, `
-			INSERT INTO user_goal_progress (
-				user_id, goal_id, challenge_id, namespace,
-				progress, status, created_at, updated_at, is_active
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		`, "user6", "goal1", "challenge1", "test", 0, domain.GoalStatusNotStarted, yesterday, yesterday, true)
-		if err != nil {
-			t.Fatalf("Direct insert failed: %v", err)
-		}
-
-		// First batch with daily increment
-		first := []ProgressIncrement{
-			{UserID: "user6", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 1, TargetValue: 7, IsDailyIncrement: true},
-		}
-		err = repo.BatchIncrementProgress(ctx, first)
-		if err != nil {
-			t.Fatalf("First BatchIncrementProgress failed: %v", err)
-		}
-
-		p1, _ := repo.GetProgress(ctx, "user6", "goal1")
-		initialProgress := p1.Progress
-
-		// Second batch same day (should be no-op)
-		second := []ProgressIncrement{
-			{UserID: "user6", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 1, TargetValue: 7, IsDailyIncrement: true},
-		}
-		err = repo.BatchIncrementProgress(ctx, second)
-		if err != nil {
-			t.Fatalf("Second BatchIncrementProgress failed: %v", err)
-		}
-
-		p2, _ := repo.GetProgress(ctx, "user6", "goal1")
-		if p2.Progress != initialProgress {
-			t.Errorf("Progress = %d, want %d (same day no-op)", p2.Progress, initialProgress)
-		}
-	})
-
-	t.Run("batch increment - large batch (100 increments)", func(t *testing.T) {
-		// M3 Phase 9: First create 100 records
-		// Regular increments (odd indices) - use BulkInsert
-		regularRecords := make([]*domain.UserGoalProgress, 0, 50)
-		for i := 1; i < 100; i += 2 {
-			regularRecords = append(regularRecords, &domain.UserGoalProgress{
-				UserID:      "batchuser",
-				GoalID:      fmt.Sprintf("goal%d", i),
-				ChallengeID: "challenge1",
-				Namespace:   "test",
-				Progress:    0,
-				Status:      domain.GoalStatusNotStarted,
-				IsActive:    true,
-			})
-		}
-		err := repo.BulkInsert(ctx, regularRecords)
-		if err != nil {
-			t.Fatalf("BulkInsert for regular goals failed: %v", err)
-		}
-
-		// Daily increments (even indices) - use direct insert with yesterday's timestamp
-		yesterday := time.Now().UTC().Add(-24 * time.Hour)
-		for i := 0; i < 100; i += 2 {
-			_, err := db.ExecContext(ctx, `
-				INSERT INTO user_goal_progress (
-					user_id, goal_id, challenge_id, namespace,
-					progress, status, created_at, updated_at, is_active
-				) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			`, "batchuser", fmt.Sprintf("goal%d", i), "challenge1", "test", 0, domain.GoalStatusNotStarted, yesterday, yesterday, true)
-			if err != nil {
-				t.Fatalf("Direct insert for daily goal%d failed: %v", i, err)
-			}
-		}
-
-		increments := make([]ProgressIncrement, 100)
-		for i := 0; i < 100; i++ {
-			increments[i] = ProgressIncrement{
-				UserID:           "batchuser",
-				GoalID:           fmt.Sprintf("goal%d", i),
-				ChallengeID:      "challenge1",
-				Namespace:        "test",
-				Delta:            1,
-				TargetValue:      10,
-				IsDailyIncrement: i%2 == 0, // Alternating regular/daily
-			}
-		}
-
-		err = repo.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("Large BatchIncrementProgress failed: %v", err)
-		}
-
-		// Verify a few random goals were created
-		p1, _ := repo.GetProgress(ctx, "batchuser", "goal0")
-		if p1 == nil || p1.Progress != 1 {
-			t.Error("goal0 not created correctly")
-		}
-
-		p50, _ := repo.GetProgress(ctx, "batchuser", "goal50")
-		if p50 == nil || p50.Progress != 1 {
-			t.Error("goal50 not created correctly")
-		}
-
-		p99, _ := repo.GetProgress(ctx, "batchuser", "goal99")
-		if p99 == nil || p99.Progress != 1 {
-			t.Error("goal99 not created correctly")
-		}
-	})
-
-	t.Run("batch increment - claimed protection", func(t *testing.T) {
-		// Insert claimed goal
-		completedTime := time.Now()
-		claimedTime := time.Now()
-		progress := &domain.UserGoalProgress{
-			UserID:      "user7",
-			GoalID:      "goal1",
-			ChallengeID: "challenge1",
-			Namespace:   "test",
-			Progress:    10,
-			Status:      domain.GoalStatusClaimed,
-			CompletedAt: &completedTime,
-			ClaimedAt:   &claimedTime,
-		}
-		err := repo.UpsertProgress(ctx, progress)
-		if err != nil {
-			t.Fatalf("Initial UpsertProgress failed: %v", err)
-		}
-
-		// Try to increment claimed goal in batch
-		increments := []ProgressIncrement{
-			{UserID: "user7", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 5, TargetValue: 10, IsDailyIncrement: false},
-		}
-		err = repo.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("BatchIncrementProgress failed: %v", err)
-		}
-
-		// Verify it was NOT updated
-		retrieved, _ := repo.GetProgress(ctx, "user7", "goal1")
-		if retrieved.Progress != 10 {
-			t.Errorf("Progress = %d, want 10 (claimed goals should not be updated)", retrieved.Progress)
-		}
-	})
-
-	// M3 Phase 5: Assignment control tests for BatchIncrementProgress
-	t.Run("M3: increment updates assigned goal (is_active = true)", func(t *testing.T) {
-		// 1. Create goal with is_active = true
-		now := time.Now()
-		initial := &domain.UserGoalProgress{
-			UserID:      "m3-batch-user1",
-			GoalID:      "m3-batch-goal1",
-			ChallengeID: "challenge1",
-			Namespace:   "test",
-			Progress:    5,
-			Status:      domain.GoalStatusInProgress,
-			IsActive:    true,
-			AssignedAt:  &now,
-		}
-		err := repo.UpsertProgress(ctx, initial)
-		if err != nil {
-			t.Fatalf("Initial insert failed: %v", err)
-		}
-
-		// 2. Simulate increment event
-		increments := []ProgressIncrement{
-			{
-				UserID:           "m3-batch-user1",
-				GoalID:           "m3-batch-goal1",
-				ChallengeID:      "challenge1",
-				Namespace:        "test",
-				Delta:            3,
-				TargetValue:      10,
-				IsDailyIncrement: false,
-			},
-		}
-		err = repo.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("BatchIncrementProgress failed: %v", err)
-		}
-
-		// 3. Verify row was updated (5 + 3 = 8)
-		result, err := repo.GetProgress(ctx, "m3-batch-user1", "m3-batch-goal1")
-		if err != nil {
-			t.Fatalf("GetProgress failed: %v", err)
-		}
-		if result.Progress != 8 {
-			t.Errorf("Progress = %d, want 8 (5+3, should be updated)", result.Progress)
-		}
-	})
-
-	t.Run("M3: increment does NOT update unassigned goal (is_active = false)", func(t *testing.T) {
-		// 1. Create goal with is_active = false
-		now := time.Now()
-		initial := &domain.UserGoalProgress{
-			UserID:      "m3-batch-user2",
-			GoalID:      "m3-batch-goal2",
-			ChallengeID: "challenge1",
-			Namespace:   "test",
-			Progress:    5,
-			Status:      domain.GoalStatusInProgress,
-			IsActive:    false, // ← Unassigned
-			AssignedAt:  &now,
-		}
-		err := repo.UpsertProgress(ctx, initial)
-		if err != nil {
-			t.Fatalf("Initial insert failed: %v", err)
-		}
-
-		// 2. Simulate increment event
-		increments := []ProgressIncrement{
-			{
-				UserID:           "m3-batch-user2",
-				GoalID:           "m3-batch-goal2",
-				ChallengeID:      "challenge1",
-				Namespace:        "test",
-				Delta:            3,
-				TargetValue:      10,
-				IsDailyIncrement: false,
-			},
-		}
-		err = repo.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("BatchIncrementProgress should not error: %v", err)
-		}
-
-		// 3. Verify row was NOT updated (still 5)
-		result, err := repo.GetProgress(ctx, "m3-batch-user2", "m3-batch-goal2")
-		if err != nil {
-			t.Fatalf("GetProgress failed: %v", err)
-		}
-		if result.Progress != 5 {
-			t.Errorf("Progress = %d, want 5 (should NOT be updated)", result.Progress)
-		}
-	})
-
-	t.Run("M3: activate, increment updates, deactivate, increment does NOT update", func(t *testing.T) {
-		// 1. Create assigned goal
-		now := time.Now()
-		initial := &domain.UserGoalProgress{
-			UserID:      "m3-batch-user3",
-			GoalID:      "m3-batch-goal3",
-			ChallengeID: "challenge1",
-			Namespace:   "test",
-			Progress:    0,
-			Status:      domain.GoalStatusNotStarted,
-			IsActive:    true,
-			AssignedAt:  &now,
-		}
-		err := repo.UpsertProgress(ctx, initial)
-		if err != nil {
-			t.Fatalf("Initial insert failed: %v", err)
-		}
-
-		// 2. Increment updates assigned goal
-		increments1 := []ProgressIncrement{
-			{
-				UserID:           "m3-batch-user3",
-				GoalID:           "m3-batch-goal3",
-				ChallengeID:      "challenge1",
-				Namespace:        "test",
-				Delta:            5,
-				TargetValue:      10,
-				IsDailyIncrement: false,
-			},
-		}
-		err = repo.BatchIncrementProgress(ctx, increments1)
-		if err != nil {
-			t.Fatalf("First increment failed: %v", err)
-		}
-
-		// Verify update worked
-		result, _ := repo.GetProgress(ctx, "m3-batch-user3", "m3-batch-goal3")
-		if result.Progress != 5 {
-			t.Errorf("After first increment: progress = %d, want 5", result.Progress)
-		}
-
-		// 3. Deactivate goal
-		err = repo.UpsertGoalActive(ctx, &domain.UserGoalProgress{
-			UserID:      "m3-batch-user3",
-			GoalID:      "m3-batch-goal3",
-			ChallengeID: "challenge1",
-			Namespace:   "test",
-			IsActive:    false,
-		})
-		if err != nil {
-			t.Fatalf("Deactivation failed: %v", err)
-		}
-
-		// 4. Increment should NOT update unassigned goal
-		increments2 := []ProgressIncrement{
-			{
-				UserID:           "m3-batch-user3",
-				GoalID:           "m3-batch-goal3",
-				ChallengeID:      "challenge1",
-				Namespace:        "test",
-				Delta:            3,
-				TargetValue:      10,
-				IsDailyIncrement: false,
-			},
-		}
-		err = repo.BatchIncrementProgress(ctx, increments2)
-		if err != nil {
-			t.Fatalf("Second increment failed: %v", err)
-		}
-
-		// Verify update was blocked
-		result, _ = repo.GetProgress(ctx, "m3-batch-user3", "m3-batch-goal3")
-		if result.Progress != 5 {
-			t.Errorf("After deactivation: progress = %d, want 5 (should NOT be updated)", result.Progress)
-		}
-	})
-}
-
-func TestPostgresTxRepository_IncrementProgress(t *testing.T) {
-	db := setupTestDB(t)
-	if db == nil {
-		return
-	}
-	defer cleanupTestDB(t, db)
-
-	repo := NewPostgresGoalRepository(db)
-	ctx := context.Background()
-
-	t.Run("transaction - regular increment", func(t *testing.T) {
-		tx, err := repo.BeginTx(ctx)
-		if err != nil {
-			t.Fatalf("BeginTx failed: %v", err)
-		}
-
-		err = tx.IncrementProgress(ctx, "txuser1", "goal1", "challenge1", "test", 5, 10, false)
-		if err != nil {
-			t.Fatalf("IncrementProgress in tx failed: %v", err)
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			t.Fatalf("Commit failed: %v", err)
-		}
-
-		// Verify increment persisted
-		progress, _ := repo.GetProgress(ctx, "txuser1", "goal1")
-		if progress == nil || progress.Progress != 5 {
-			t.Error("Increment in transaction did not persist correctly")
-		}
-	})
-
-	t.Run("transaction - daily increment", func(t *testing.T) {
-		tx, err := repo.BeginTx(ctx)
-		if err != nil {
-			t.Fatalf("BeginTx failed: %v", err)
-		}
-
-		err = tx.IncrementProgress(ctx, "txuser2", "goal2", "challenge1", "test", 1, 7, true)
-		if err != nil {
-			t.Fatalf("IncrementProgress (daily) in tx failed: %v", err)
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			t.Fatalf("Commit failed: %v", err)
-		}
-
-		// Verify increment persisted
-		progress, _ := repo.GetProgress(ctx, "txuser2", "goal2")
-		if progress == nil || progress.Progress != 1 {
-			t.Error("Daily increment in transaction did not persist correctly")
-		}
-	})
-
-	t.Run("transaction - rollback discards increment", func(t *testing.T) {
-		tx, err := repo.BeginTx(ctx)
-		if err != nil {
-			t.Fatalf("BeginTx failed: %v", err)
-		}
-
-		err = tx.IncrementProgress(ctx, "txuser3", "goal3", "challenge1", "test", 10, 10, false)
-		if err != nil {
-			t.Fatalf("IncrementProgress in tx failed: %v", err)
-		}
-
-		err = tx.Rollback()
-		if err != nil {
-			t.Fatalf("Rollback failed: %v", err)
-		}
-
-		// Verify increment was discarded
-		progress, _ := repo.GetProgress(ctx, "txuser3", "goal3")
-		if progress != nil {
-			t.Errorf("Increment should have been discarded after rollback, got progress=%d", progress.Progress)
-		}
-	})
-}
-
-func TestPostgresTxRepository_BatchIncrementProgress(t *testing.T) {
-	db := setupTestDB(t)
-	if db == nil {
-		return
-	}
-	defer cleanupTestDB(t, db)
-
-	repo := NewPostgresGoalRepository(db)
-	ctx := context.Background()
-
-	t.Run("transaction - batch increment commit", func(t *testing.T) {
-		tx, err := repo.BeginTx(ctx)
-		if err != nil {
-			t.Fatalf("BeginTx failed: %v", err)
-		}
-
-		increments := []ProgressIncrement{
-			{UserID: "txuser4", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 3, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "txuser4", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 1, TargetValue: 7, IsDailyIncrement: true},
-			{UserID: "txuser5", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 5, TargetValue: 10, IsDailyIncrement: false},
-		}
-
-		err = tx.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("BatchIncrementProgress in tx failed: %v", err)
-		}
-
-		err = tx.Commit()
-		if err != nil {
-			t.Fatalf("Commit failed: %v", err)
-		}
-
-		// Verify all increments persisted
-		p1, _ := repo.GetProgress(ctx, "txuser4", "goal1")
-		if p1 == nil || p1.Progress != 3 {
-			t.Error("txuser4/goal1 not incremented correctly in transaction")
-		}
-
-		p2, _ := repo.GetProgress(ctx, "txuser4", "goal2")
-		if p2 == nil || p2.Progress != 1 {
-			t.Error("txuser4/goal2 (daily) not incremented correctly in transaction")
-		}
-
-		p3, _ := repo.GetProgress(ctx, "txuser5", "goal1")
-		if p3 == nil || p3.Progress != 5 {
-			t.Error("txuser5/goal1 not incremented correctly in transaction")
-		}
-	})
-
-	t.Run("transaction - batch increment rollback", func(t *testing.T) {
-		tx, err := repo.BeginTx(ctx)
-		if err != nil {
-			t.Fatalf("BeginTx failed: %v", err)
-		}
-
-		increments := []ProgressIncrement{
-			{UserID: "txuser6", GoalID: "goal1", ChallengeID: "challenge1", Namespace: "test", Delta: 3, TargetValue: 10, IsDailyIncrement: false},
-			{UserID: "txuser6", GoalID: "goal2", ChallengeID: "challenge1", Namespace: "test", Delta: 5, TargetValue: 10, IsDailyIncrement: false},
-		}
-
-		err = tx.BatchIncrementProgress(ctx, increments)
-		if err != nil {
-			t.Fatalf("BatchIncrementProgress in tx failed: %v", err)
-		}
-
-		err = tx.Rollback()
-		if err != nil {
-			t.Fatalf("Rollback failed: %v", err)
-		}
-
-		// Verify batch increments were discarded
-		p1, _ := repo.GetProgress(ctx, "txuser6", "goal1")
-		if p1 != nil {
-			t.Error("Batch increments should have been discarded after rollback")
-		}
-
-		p2, _ := repo.GetProgress(ctx, "txuser6", "goal2")
-		if p2 != nil {
-			t.Error("Batch increments should have been discarded after rollback")
 		}
 	})
 }
@@ -4348,17 +3399,36 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("transaction_batch_COPY_commit", func(t *testing.T) {
-		// Create 100 progresses for COPY batch
-		progresses := make([]*domain.UserGoalProgress, 100)
+		// First create 100 initial records using BulkInsertWithCOPY
+		initialRecords := make([]*domain.UserGoalProgress, 100)
 		for i := 0; i < 100; i++ {
-			progresses[i] = &domain.UserGoalProgress{
+			initialRecords[i] = &domain.UserGoalProgress{
 				UserID:      fmt.Sprintf("copy-user-%d", i),
 				GoalID:      "copy-goal-1",
 				ChallengeID: "copy-challenge-1",
 				Namespace:   "test",
-				Progress:    10 + i,
-				Status:      domain.GoalStatusInProgress,
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
 				IsActive:    true,
+			}
+		}
+		err := repo.BulkInsertWithCOPY(ctx, initialRecords)
+		if err != nil {
+			t.Fatalf("BulkInsertWithCOPY setup failed: %v", err)
+		}
+
+		// Create 100 CopyRow updates
+		rows := make([]CopyRow, 100)
+		for i := 0; i < 100; i++ {
+			p := 10 + i
+			rows[i] = CopyRow{
+				UserID:       fmt.Sprintf("copy-user-%d", i),
+				GoalID:       "copy-goal-1",
+				ChallengeID:  "copy-challenge-1",
+				Namespace:    "test",
+				Progress:     &p,
+				ProgressMode: "absolute",
+				TargetValue:  1000,
 			}
 		}
 
@@ -4368,8 +3438,8 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 			t.Fatalf("BeginTx failed: %v", err)
 		}
 
-		// Batch insert using COPY
-		err = tx.BatchUpsertProgressWithCOPY(ctx, progresses)
+		// Batch update using COPY
+		err = tx.BatchUpsertProgressWithCOPY(ctx, rows)
 		if err != nil {
 			t.Fatalf("BatchUpsertProgressWithCOPY failed: %v", err)
 		}
@@ -4380,7 +3450,7 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 			t.Fatalf("Commit failed: %v", err)
 		}
 
-		// Verify: All 100 records exist
+		// Verify: All 100 records updated
 		for i := 0; i < 100; i++ {
 			result, err := repo.GetProgress(ctx, fmt.Sprintf("copy-user-%d", i), "copy-goal-1")
 			if err != nil {
@@ -4395,17 +3465,36 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 	})
 
 	t.Run("transaction_batch_COPY_rollback", func(t *testing.T) {
-		// Create 50 progresses
-		progresses := make([]*domain.UserGoalProgress, 50)
+		// First create 50 initial records
+		initialRecords := make([]*domain.UserGoalProgress, 50)
 		for i := 0; i < 50; i++ {
-			progresses[i] = &domain.UserGoalProgress{
+			initialRecords[i] = &domain.UserGoalProgress{
 				UserID:      fmt.Sprintf("copy-rollback-user-%d", i),
 				GoalID:      "copy-rollback-goal-1",
 				ChallengeID: "copy-rollback-challenge-1",
 				Namespace:   "test",
-				Progress:    20 + i,
-				Status:      domain.GoalStatusInProgress,
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
 				IsActive:    true,
+			}
+		}
+		err := repo.BulkInsertWithCOPY(ctx, initialRecords)
+		if err != nil {
+			t.Fatalf("BulkInsertWithCOPY setup failed: %v", err)
+		}
+
+		// Create CopyRow updates
+		rows := make([]CopyRow, 50)
+		for i := 0; i < 50; i++ {
+			p := 20 + i
+			rows[i] = CopyRow{
+				UserID:       fmt.Sprintf("copy-rollback-user-%d", i),
+				GoalID:       "copy-rollback-goal-1",
+				ChallengeID:  "copy-rollback-challenge-1",
+				Namespace:    "test",
+				Progress:     &p,
+				ProgressMode: "absolute",
+				TargetValue:  1000,
 			}
 		}
 
@@ -4415,8 +3504,8 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 			t.Fatalf("BeginTx failed: %v", err)
 		}
 
-		// Batch insert using COPY
-		err = tx.BatchUpsertProgressWithCOPY(ctx, progresses)
+		// Batch update using COPY
+		err = tx.BatchUpsertProgressWithCOPY(ctx, rows)
 		if err != nil {
 			t.Fatalf("BatchUpsertProgressWithCOPY failed: %v", err)
 		}
@@ -4427,31 +3516,54 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 			t.Fatalf("Rollback failed: %v", err)
 		}
 
-		// Verify: No records exist (rollback discarded them)
+		// Verify: Records still have original progress (rollback discarded updates)
 		for i := 0; i < 50; i++ {
 			result, err := repo.GetProgress(ctx, fmt.Sprintf("copy-rollback-user-%d", i), "copy-rollback-goal-1")
 			if err != nil {
 				t.Errorf("User %d: GetProgress failed: %v", i, err)
 				continue
 			}
-			if result != nil {
-				t.Errorf("User %d: expected record not found after rollback, but found it", i)
+			if result == nil {
+				t.Errorf("User %d: expected record to exist", i)
+				continue
+			}
+			if result.Progress != 0 {
+				t.Errorf("User %d: expected progress 0 after rollback, got %d", i, result.Progress)
 			}
 		}
 	})
 
 	t.Run("transaction_COPY_handles_large_batches", func(t *testing.T) {
-		// Create 1000 progresses for stress test
-		progresses := make([]*domain.UserGoalProgress, 1000)
+		// First create 1000 initial records
+		initialRecords := make([]*domain.UserGoalProgress, 1000)
 		for i := 0; i < 1000; i++ {
-			progresses[i] = &domain.UserGoalProgress{
+			initialRecords[i] = &domain.UserGoalProgress{
 				UserID:      fmt.Sprintf("copy-large-user-%d", i),
 				GoalID:      "copy-large-goal-1",
 				ChallengeID: "copy-large-challenge-1",
 				Namespace:   "test",
-				Progress:    i,
-				Status:      domain.GoalStatusInProgress,
+				Progress:    0,
+				Status:      domain.GoalStatusNotStarted,
 				IsActive:    true,
+			}
+		}
+		err := repo.BulkInsertWithCOPY(ctx, initialRecords)
+		if err != nil {
+			t.Fatalf("BulkInsertWithCOPY setup failed: %v", err)
+		}
+
+		// Create 1000 CopyRow updates for stress test
+		rows := make([]CopyRow, 1000)
+		for i := 0; i < 1000; i++ {
+			p := i
+			rows[i] = CopyRow{
+				UserID:       fmt.Sprintf("copy-large-user-%d", i),
+				GoalID:       "copy-large-goal-1",
+				ChallengeID:  "copy-large-challenge-1",
+				Namespace:    "test",
+				Progress:     &p,
+				ProgressMode: "absolute",
+				TargetValue:  10000,
 			}
 		}
 
@@ -4461,9 +3573,9 @@ func TestPostgresTxRepository_BatchUpsertProgressWithCOPY(t *testing.T) {
 			t.Fatalf("BeginTx failed: %v", err)
 		}
 
-		// Batch insert using COPY
+		// Batch update using COPY
 		start := time.Now()
-		err = tx.BatchUpsertProgressWithCOPY(ctx, progresses)
+		err = tx.BatchUpsertProgressWithCOPY(ctx, rows)
 		elapsed := time.Since(start)
 		if err != nil {
 			t.Fatalf("BatchUpsertProgressWithCOPY failed: %v", err)

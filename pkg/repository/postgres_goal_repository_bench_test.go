@@ -11,6 +11,11 @@ import (
 	_ "github.com/lib/pq"
 )
 
+// intPtr is a helper to create *int values for CopyRow.Progress
+func intPtr(v int) *int {
+	return &v
+}
+
 // BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl benchmarks M3 assignment control
 // in the BatchUpsertProgressWithCOPY query. Tests that inactive goals are skipped efficiently.
 func BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl(b *testing.B) {
@@ -52,21 +57,22 @@ func BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl(b *testing.B) {
 	}
 
 	// Benchmark: Update all 1,000 goals (only 500 active should update)
-	updateGoals := make([]*domain.UserGoalProgress, 1000)
+	updateRows := make([]CopyRow, 1000)
 	for i := 0; i < 1000; i++ {
-		updateGoals[i] = &domain.UserGoalProgress{
-			UserID:      fmt.Sprintf("bench-user-%d", i),
-			GoalID:      fmt.Sprintf("bench-goal-%d", i),
-			ChallengeID: "bench-challenge",
-			Namespace:   "test",
-			Progress:    10,
-			Status:      domain.GoalStatusCompleted,
+		updateRows[i] = CopyRow{
+			UserID:       fmt.Sprintf("bench-user-%d", i),
+			GoalID:       fmt.Sprintf("bench-goal-%d", i),
+			ChallengeID:  "bench-challenge",
+			Namespace:    "test",
+			Progress:     intPtr(10),
+			ProgressMode: "absolute",
+			TargetValue:  10,
 		}
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := repo.BatchUpsertProgressWithCOPY(ctx, updateGoals)
+		err := repo.BatchUpsertProgressWithCOPY(ctx, updateRows)
 		if err != nil {
 			b.Fatalf("Batch update failed: %v", err)
 		}
@@ -105,200 +111,6 @@ func BenchmarkBatchUpsertProgressWithCOPY_AssignmentControl(b *testing.B) {
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
 }
 
-// BenchmarkBatchIncrementProgress_AssignmentControl benchmarks M3 assignment control
-// in the BatchIncrementProgress query using UNNEST pattern.
-func BenchmarkBatchIncrementProgress_AssignmentControl(b *testing.B) {
-	if testing.Short() {
-		b.Skip("Skipping benchmark in short mode")
-	}
-
-	db := setupTestDBForBench(b)
-	if db == nil {
-		return
-	}
-	defer cleanupTestDBForBench(b, db)
-
-	repo := NewPostgresGoalRepository(db)
-	ctx := context.Background()
-
-	// Setup: Create 1,000 goals (500 active, 500 inactive)
-	setupGoals := make([]*domain.UserGoalProgress, 1000)
-	for i := 0; i < 1000; i++ {
-		isActive := i%2 == 0
-		now := time.Now()
-		setupGoals[i] = &domain.UserGoalProgress{
-			UserID:      fmt.Sprintf("bench-user-%d", i),
-			GoalID:      fmt.Sprintf("bench-goal-%d", i),
-			ChallengeID: "bench-challenge",
-			Namespace:   "test",
-			Progress:    5,
-			Status:      domain.GoalStatusInProgress,
-			IsActive:    isActive,
-			AssignedAt:  &now,
-		}
-	}
-
-	// Use BulkInsertWithCOPY instead of BatchUpsertProgressWithCOPY because the latter
-	// only UPDATES existing rows (M3 Phase 9 lazy materialization) - it won't create new rows
-	err := repo.BulkInsertWithCOPY(ctx, setupGoals)
-	if err != nil {
-		b.Fatalf("Setup failed: %v", err)
-	}
-
-	// Benchmark: Increment all 1,000 goals by 3 (only 500 active should increment)
-	incrementGoals := make([]ProgressIncrement, 1000)
-	for i := 0; i < 1000; i++ {
-		incrementGoals[i] = ProgressIncrement{
-			UserID:      fmt.Sprintf("bench-user-%d", i),
-			GoalID:      fmt.Sprintf("bench-goal-%d", i),
-			ChallengeID: "bench-challenge",
-			Namespace:   "test",
-			Delta:       3, // Increment by 3
-			TargetValue: 10,
-		}
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		err := repo.BatchIncrementProgress(ctx, incrementGoals)
-		if err != nil {
-			b.Fatalf("Batch increment failed: %v", err)
-		}
-
-		// Verify after first run only to check assignment control works
-		// Note: nestif disabled for benchmark verification code to keep readable
-		if i == 0 { //nolint:nestif
-			var activeIncremented, inactiveNotIncremented int
-			expectedActiveProgress := 5 + 3 // Initial 5 + first increment of 3
-			for j := 0; j < 1000; j++ {
-				result, err := repo.GetProgress(ctx, fmt.Sprintf("bench-user-%d", j), fmt.Sprintf("bench-goal-%d", j))
-				if err != nil {
-					b.Fatalf("GetProgress failed: %v", err)
-				}
-
-				isActive := j%2 == 0
-				if isActive && result.Progress == expectedActiveProgress {
-					activeIncremented++
-				} else if !isActive && result.Progress == 5 {
-					inactiveNotIncremented++
-				}
-			}
-
-			if activeIncremented != 500 {
-				b.Errorf("Active goals incremented = %d, want 500 (expected progress: %d)", activeIncremented, expectedActiveProgress)
-			}
-			if inactiveNotIncremented != 500 {
-				b.Errorf("Inactive goals NOT incremented = %d, want 500", inactiveNotIncremented)
-			}
-		}
-	}
-	b.StopTimer()
-
-	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
-}
-
-// BenchmarkIncrementProgress_AssignmentControl benchmarks M3 assignment control
-// in the single-row IncrementProgress query.
-func BenchmarkIncrementProgress_AssignmentControl(b *testing.B) {
-	if testing.Short() {
-		b.Skip("Skipping benchmark in short mode")
-	}
-
-	db := setupTestDBForBench(b)
-	if db == nil {
-		return
-	}
-	defer cleanupTestDBForBench(b, db)
-
-	repo := NewPostgresGoalRepository(db)
-	ctx := context.Background()
-
-	// Setup: Create 2 goals (1 active, 1 inactive)
-	now := time.Now()
-	activeGoal := &domain.UserGoalProgress{
-		UserID:      "bench-user-active",
-		GoalID:      "bench-goal-active",
-		ChallengeID: "bench-challenge",
-		Namespace:   "test",
-		Progress:    0,
-		Status:      domain.GoalStatusInProgress,
-		IsActive:    true,
-		AssignedAt:  &now,
-	}
-	inactiveGoal := &domain.UserGoalProgress{
-		UserID:      "bench-user-inactive",
-		GoalID:      "bench-goal-inactive",
-		ChallengeID: "bench-challenge",
-		Namespace:   "test",
-		Progress:    0,
-		Status:      domain.GoalStatusInProgress,
-		IsActive:    false,
-		AssignedAt:  &now,
-	}
-
-	err := repo.UpsertProgress(ctx, activeGoal)
-	if err != nil {
-		b.Fatalf("Setup active goal failed: %v", err)
-	}
-	err = repo.UpsertProgress(ctx, inactiveGoal)
-	if err != nil {
-		b.Fatalf("Setup inactive goal failed: %v", err)
-	}
-
-	// Benchmark: Increment active goal
-	b.Run("ActiveGoal", func(b *testing.B) {
-		// Reset progress to 0 before each benchmark run to avoid state pollution
-		_, err := db.ExecContext(ctx, "UPDATE user_goal_progress SET progress = 0 WHERE user_id = $1 AND goal_id = $2",
-			"bench-user-active", "bench-goal-active")
-		if err != nil {
-			b.Fatalf("Failed to reset progress: %v", err)
-		}
-
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			err := repo.IncrementProgress(ctx, "bench-user-active", "bench-goal-active", "bench-challenge", "test", 1, 100, false)
-			if err != nil {
-				b.Fatalf("IncrementProgress failed: %v", err)
-			}
-		}
-		b.StopTimer()
-
-		// Verify: Active goal was incremented
-		result, err := repo.GetProgress(ctx, "bench-user-active", "bench-goal-active")
-		if err != nil {
-			b.Fatalf("GetProgress failed: %v", err)
-		}
-		if result.Progress != b.N {
-			b.Errorf("Active goal progress = %d, want %d", result.Progress, b.N)
-		}
-
-		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
-	})
-
-	// Benchmark: Try to increment inactive goal (should be no-op)
-	b.Run("InactiveGoal", func(b *testing.B) {
-		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
-			err := repo.IncrementProgress(ctx, "bench-user-inactive", "bench-goal-inactive", "bench-challenge", "test", 1, 100, false)
-			if err != nil {
-				b.Fatalf("IncrementProgress failed: %v", err)
-			}
-		}
-		b.StopTimer()
-
-		// Verify: Inactive goal was NOT incremented
-		result, err := repo.GetProgress(ctx, "bench-user-inactive", "bench-goal-inactive")
-		if err != nil {
-			b.Fatalf("GetProgress failed: %v", err)
-		}
-		if result.Progress != 0 {
-			b.Errorf("Inactive goal progress = %d, want 0 (should not increment)", result.Progress)
-		}
-
-		b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/1000000, "ms/op")
-	})
-}
-
 // BenchmarkBatchUpsertProgressWithCOPY_Baseline benchmarks the COPY protocol baseline
 // performance without assignment control concerns (all goals active).
 func BenchmarkBatchUpsertProgressWithCOPY_Baseline(b *testing.B) {
@@ -318,7 +130,7 @@ func BenchmarkBatchUpsertProgressWithCOPY_Baseline(b *testing.B) {
 	sizes := []int{100, 500, 1000, 5000, 10000}
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Size%d", size), func(b *testing.B) {
-			// Setup: Create N goals (all active)
+			// Setup: Create N goals (all active) using BulkInsertWithCOPY
 			setupGoals := make([]*domain.UserGoalProgress, size)
 			for i := 0; i < size; i++ {
 				now := time.Now()
@@ -334,27 +146,28 @@ func BenchmarkBatchUpsertProgressWithCOPY_Baseline(b *testing.B) {
 				}
 			}
 
-			err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+			err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 			if err != nil {
 				b.Fatalf("Setup failed: %v", err)
 			}
 
 			// Benchmark: Update all N goals
-			updateGoals := make([]*domain.UserGoalProgress, size)
+			updateRows := make([]CopyRow, size)
 			for i := 0; i < size; i++ {
-				updateGoals[i] = &domain.UserGoalProgress{
-					UserID:      fmt.Sprintf("baseline-user-%d", i),
-					GoalID:      fmt.Sprintf("baseline-goal-%d", i),
-					ChallengeID: "baseline-challenge",
-					Namespace:   "test",
-					Progress:    10,
-					Status:      domain.GoalStatusCompleted,
+				updateRows[i] = CopyRow{
+					UserID:       fmt.Sprintf("baseline-user-%d", i),
+					GoalID:       fmt.Sprintf("baseline-goal-%d", i),
+					ChallengeID:  "baseline-challenge",
+					Namespace:    "test",
+					Progress:     intPtr(10),
+					ProgressMode: "absolute",
+					TargetValue:  10,
 				}
 			}
 
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				err := repo.BatchUpsertProgressWithCOPY(ctx, updateGoals)
+				err := repo.BatchUpsertProgressWithCOPY(ctx, updateRows)
 				if err != nil {
 					b.Fatalf("Batch update failed: %v", err)
 				}

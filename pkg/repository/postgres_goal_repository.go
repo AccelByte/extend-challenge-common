@@ -224,19 +224,17 @@ func (r *PostgresGoalRepository) BatchUpsertProgress(ctx context.Context, update
 	return nil
 }
 
-// BatchUpsertProgressWithCOPY performs batch upsert using PostgreSQL COPY protocol.
-// This is 5-10x faster than BatchUpsertProgress (10-20ms vs 62-105ms for 1,000 records).
+// BatchUpsertProgressWithCOPY performs batch upsert using PostgreSQL COPY protocol (M5 Phase 2: Unified COPY Path).
+// Accepts CopyRow slices carrying both absolute and increment events through a single flush path.
+// Status and completion are computed in SQL CASE expressions, not in Go code.
 //
 // Implementation:
-// 1. Creates temporary table (session-local, auto-dropped)
+// 1. Creates temp table with progress_mode, inc_value, target_value columns
 // 2. Uses COPY FROM STDIN to bulk load data (bypasses query parser)
-// 3. Merges temp table into main table using INSERT ... SELECT with ON CONFLICT
-// 4. Maintains claimed protection logic (does not update claimed goals)
-//
-// This method solves the Phase 1 database bottleneck by reducing flush time from
-// 62-105ms to 10-20ms, allowing the system to handle 500+ EPS with <1% data loss.
-func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context, updates []*domain.UserGoalProgress) error {
-	if len(updates) == 0 {
+// 3. UPDATE-only merge with SQL-side status computation
+// 4. Maintains claimed protection and is_active check
+func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context, rows []CopyRow) error {
+	if len(rows) == 0 {
 		return nil
 	}
 
@@ -251,17 +249,18 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 		}
 	}()
 
-	// Step 1: Create temporary table (session-local, automatically dropped at end of session)
+	// Step 1: Create temporary table with unified schema
 	_, err = tx.ExecContext(ctx, `
-		CREATE TEMP TABLE IF NOT EXISTS temp_user_goal_progress (
-			user_id VARCHAR(100) NOT NULL,
-			goal_id VARCHAR(100) NOT NULL,
-			challenge_id VARCHAR(100) NOT NULL,
-			namespace VARCHAR(100) NOT NULL,
-			progress INT NOT NULL,
-			status VARCHAR(20) NOT NULL,
-			completed_at TIMESTAMP NULL,
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+		CREATE TEMP TABLE IF NOT EXISTS temp_event_progress (
+			user_id       VARCHAR(100) NOT NULL,
+			goal_id       VARCHAR(100) NOT NULL,
+			challenge_id  VARCHAR(100) NOT NULL,
+			namespace     VARCHAR(100) NOT NULL,
+			progress      INT          NULL,
+			progress_mode VARCHAR(20)  NOT NULL,
+			inc_value     INT          NOT NULL DEFAULT 0,
+			target_value  INT          NOT NULL DEFAULT 0,
+			updated_at    TIMESTAMP    NOT NULL DEFAULT NOW()
 		) ON COMMIT DROP
 	`)
 	if err != nil {
@@ -270,9 +269,9 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 
 	// Step 2: Prepare COPY statement
 	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
-		"temp_user_goal_progress",
+		"temp_event_progress",
 		"user_id", "goal_id", "challenge_id", "namespace",
-		"progress", "status", "completed_at", "updated_at",
+		"progress", "progress_mode", "inc_value", "target_value", "updated_at",
 	))
 	if err != nil {
 		return errors.ErrDatabaseError("prepare COPY statement", err)
@@ -280,16 +279,17 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 	defer func() { _ = stmt.Close() }()
 
 	// Step 3: Bulk load data into temp table using COPY
-	now := time.Now().UTC() // Always use UTC for consistency across timezones
-	for _, update := range updates {
+	now := time.Now().UTC()
+	for _, row := range rows {
 		_, err = stmt.ExecContext(ctx,
-			update.UserID,
-			update.GoalID,
-			update.ChallengeID,
-			update.Namespace,
-			update.Progress,
-			update.Status,
-			update.CompletedAt,
+			row.UserID,
+			row.GoalID,
+			row.ChallengeID,
+			row.Namespace,
+			row.Progress, // nil for login/increment events
+			row.ProgressMode,
+			row.IncValue,
+			row.TargetValue,
 			now,
 		)
 		if err != nil {
@@ -303,22 +303,35 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 		return errors.ErrDatabaseError("flush COPY to temp table", err)
 	}
 
-	// Step 5: Merge temp table into main table using UPDATE-only (M3 Phase 9: Lazy Materialization)
-	// Changed from UPSERT to pure UPDATE to prevent row creation for unassigned goals.
-	// Events for unassigned goals become true no-ops (no row exists, UPDATE does nothing).
-	// Only updates existing rows where is_active = true and status != 'claimed'.
+	// Step 5: UPDATE-only merge with SQL-side status computation
+	// Progress: absolute events use temp.progress, increment events use ugp.progress + temp.inc_value
+	// Status: computed from effective progress vs target_value
+	// Claimed protection: WHERE clause skips claimed goals
 	_, err = tx.ExecContext(ctx, `
-		UPDATE user_goal_progress
+		UPDATE user_goal_progress AS ugp
 		SET
-			progress = temp.progress,
-			status = temp.status,
-			completed_at = temp.completed_at,
+			progress = CASE
+				WHEN temp.progress IS NOT NULL THEN temp.progress
+				ELSE ugp.progress + temp.inc_value
+			END,
+			status = CASE
+				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+					THEN 'completed'
+				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) > 0
+					THEN 'in_progress'
+				ELSE ugp.status
+			END,
+			completed_at = CASE
+				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+					 AND ugp.completed_at IS NULL THEN NOW()
+				ELSE ugp.completed_at
+			END,
 			updated_at = NOW()
-		FROM temp_user_goal_progress AS temp
-		WHERE user_goal_progress.user_id = temp.user_id
-		  AND user_goal_progress.goal_id = temp.goal_id
-		  AND user_goal_progress.is_active = true
-		  AND user_goal_progress.status != 'claimed'
+		FROM temp_event_progress AS temp
+		WHERE ugp.user_id = temp.user_id
+		  AND ugp.goal_id = temp.goal_id
+		  AND ugp.is_active = true
+		  AND ugp.status != 'claimed'
 	`)
 	if err != nil {
 		return errors.ErrDatabaseError("update user_goal_progress from temp table", err)
@@ -328,183 +341,6 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 	err = tx.Commit()
 	if err != nil {
 		return errors.ErrDatabaseError("commit COPY transaction", err)
-	}
-
-	return nil
-}
-
-// IncrementProgress atomically increments a user's progress by a delta value.
-func (r *PostgresGoalRepository) IncrementProgress(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int, isDailyIncrement bool) error {
-	if isDailyIncrement {
-		return r.incrementProgressDaily(ctx, userID, goalID, challengeID, namespace, delta, targetValue)
-	}
-	return r.incrementProgressRegular(ctx, userID, goalID, challengeID, namespace, delta, targetValue)
-}
-
-// incrementProgressRegular handles regular increments (always adds delta)
-// M3 Phase 9: Changed from UPSERT to UPDATE-only for lazy materialization
-func (r *PostgresGoalRepository) incrementProgressRegular(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int) error {
-	query := `
-		UPDATE user_goal_progress
-		SET
-			progress = progress + $3::INT,
-			status = CASE
-				WHEN progress + $3::INT >= $4::INT THEN 'completed'
-				ELSE 'in_progress'
-			END,
-			completed_at = CASE
-				WHEN progress + $3::INT >= $4::INT AND completed_at IS NULL THEN NOW()
-				ELSE completed_at
-			END,
-			updated_at = NOW()
-		WHERE user_id = $1
-		  AND goal_id = $2
-		  AND is_active = true
-		  AND status != 'claimed'
-	`
-
-	_, err := r.db.ExecContext(ctx, query, userID, goalID, delta, targetValue)
-	if err != nil {
-		return errors.ErrDatabaseError("increment progress (regular)", err)
-	}
-
-	return nil
-}
-
-// incrementProgressDaily handles daily increments (only once per day)
-// Uses timezone-safe date comparison to prevent timezone-related bugs
-// M3 Phase 9: Changed from UPSERT to UPDATE-only for lazy materialization
-func (r *PostgresGoalRepository) incrementProgressDaily(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int) error {
-	query := `
-		UPDATE user_goal_progress
-		SET
-			progress = CASE
-				-- Same day (UTC): don't increment
-				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
-					THEN progress
-				-- New day: increment by delta
-				ELSE progress + $3::INT
-			END,
-			status = CASE
-				-- Calculate new progress first, then check threshold
-				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					-- Same day, progress unchanged
-					CASE WHEN progress >= $4::INT THEN 'completed' ELSE 'in_progress' END
-				ELSE
-					-- New day, check incremented progress
-					CASE WHEN progress + $3::INT >= $4::INT THEN 'completed' ELSE 'in_progress' END
-			END,
-			completed_at = CASE
-				WHEN DATE(updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					completed_at  -- Same day, keep existing
-				WHEN progress + $3::INT >= $4::INT AND completed_at IS NULL THEN
-					NOW()  -- New day and just completed
-				ELSE
-					completed_at  -- Keep existing
-			END,
-			updated_at = NOW()  -- Always update timestamp (for daily tracking)
-		WHERE user_id = $1
-		  AND goal_id = $2
-		  AND is_active = true
-		  AND status != 'claimed'
-	`
-
-	_, err := r.db.ExecContext(ctx, query, userID, goalID, delta, targetValue)
-	if err != nil {
-		return errors.ErrDatabaseError("increment progress (daily)", err)
-	}
-
-	return nil
-}
-
-// BatchIncrementProgress performs batch atomic increment for multiple progress records.
-// Uses PostgreSQL UNNEST for efficient batch processing (50x faster than individual calls).
-func (r *PostgresGoalRepository) BatchIncrementProgress(ctx context.Context, increments []ProgressIncrement) error {
-	if len(increments) == 0 {
-		return nil
-	}
-
-	// Build arrays for UNNEST
-	userIDs := make([]string, len(increments))
-	goalIDs := make([]string, len(increments))
-	deltas := make([]int, len(increments))
-	targetValues := make([]int, len(increments))
-	isDailyFlags := make([]bool, len(increments))
-
-	for i, inc := range increments {
-		userIDs[i] = inc.UserID
-		goalIDs[i] = inc.GoalID
-		deltas[i] = inc.Delta
-		targetValues[i] = inc.TargetValue
-		isDailyFlags[i] = inc.IsDailyIncrement
-	}
-
-	// Complex query using UNNEST for batch operations with daily increment support
-	// Uses timezone-safe date comparison (AT TIME ZONE 'UTC') to prevent timezone bugs
-	// M3 Phase 9: Changed from UPSERT to UPDATE-only for lazy materialization
-	query := `
-		UPDATE user_goal_progress
-		SET
-			progress = CASE
-				-- Daily increment: check if same day (UTC)
-				WHEN t.is_daily = true
-				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
-					THEN user_goal_progress.progress  -- Same day, no increment
-				ELSE
-					user_goal_progress.progress + t.delta  -- Different day or regular increment
-			END,
-			status = CASE
-				-- Calculate based on new progress value
-				WHEN t.is_daily = true
-				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					-- Same day: status based on current progress
-					CASE WHEN user_goal_progress.progress >= t.target_value THEN 'completed' ELSE 'in_progress' END
-				ELSE
-					-- New day or regular: status based on incremented progress
-					CASE WHEN user_goal_progress.progress + t.delta >= t.target_value THEN 'completed' ELSE 'in_progress' END
-			END,
-			completed_at = CASE
-				WHEN t.is_daily = true
-				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					user_goal_progress.completed_at  -- Same day, keep existing
-				WHEN user_goal_progress.progress + t.delta >= t.target_value
-				     AND user_goal_progress.completed_at IS NULL THEN
-					NOW()  -- Just completed
-				ELSE
-					user_goal_progress.completed_at  -- Keep existing
-			END,
-			updated_at = NOW()
-		FROM (
-			SELECT
-				user_id,
-				goal_id,
-				delta,
-				target_value,
-				is_daily
-			FROM UNNEST(
-				$1::VARCHAR(100)[],  -- user_ids
-				$2::VARCHAR(100)[],  -- goal_ids
-				$3::INT[],           -- deltas
-				$4::INT[],           -- target_values
-				$5::BOOLEAN[]        -- is_daily_increment flags
-			) AS t(user_id, goal_id, delta, target_value, is_daily)
-		) AS t
-		WHERE user_goal_progress.user_id = t.user_id
-		  AND user_goal_progress.goal_id = t.goal_id
-		  AND user_goal_progress.is_active = true
-		  AND user_goal_progress.status != 'claimed'
-	`
-
-	_, err := r.db.ExecContext(ctx, query,
-		pq.Array(userIDs),
-		pq.Array(goalIDs),
-		pq.Array(deltas),
-		pq.Array(targetValues),
-		pq.Array(isDailyFlags),
-	)
-
-	if err != nil {
-		return errors.ErrDatabaseError("batch increment progress", err)
 	}
 
 	return nil
@@ -1229,27 +1065,26 @@ func (r *PostgresTxRepository) BatchUpsertProgress(ctx context.Context, updates 
 	return nil
 }
 
-// BatchUpsertProgressWithCOPY performs batch upsert using COPY protocol within a transaction.
-// This is 5-10x faster than BatchUpsertProgress.
-func (r *PostgresTxRepository) BatchUpsertProgressWithCOPY(ctx context.Context, updates []*domain.UserGoalProgress) error {
-	if len(updates) == 0 {
+// BatchUpsertProgressWithCOPY performs batch upsert using COPY protocol within a transaction (M5 Phase 2).
+func (r *PostgresTxRepository) BatchUpsertProgressWithCOPY(ctx context.Context, rows []CopyRow) error {
+	if len(rows) == 0 {
 		return nil
 	}
 
 	// Note: We're already in a transaction (r.tx), so we don't need to BEGIN/COMMIT
-	// The temp table will be dropped when the parent transaction commits/rollbacks
 
-	// Step 1: Create temporary table
+	// Step 1: Create temporary table with unified schema
 	_, err := r.tx.ExecContext(ctx, `
-		CREATE TEMP TABLE IF NOT EXISTS temp_user_goal_progress (
-			user_id VARCHAR(100) NOT NULL,
-			goal_id VARCHAR(100) NOT NULL,
-			challenge_id VARCHAR(100) NOT NULL,
-			namespace VARCHAR(100) NOT NULL,
-			progress INT NOT NULL,
-			status VARCHAR(20) NOT NULL,
-			completed_at TIMESTAMP NULL,
-			updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+		CREATE TEMP TABLE IF NOT EXISTS temp_event_progress (
+			user_id       VARCHAR(100) NOT NULL,
+			goal_id       VARCHAR(100) NOT NULL,
+			challenge_id  VARCHAR(100) NOT NULL,
+			namespace     VARCHAR(100) NOT NULL,
+			progress      INT          NULL,
+			progress_mode VARCHAR(20)  NOT NULL,
+			inc_value     INT          NOT NULL DEFAULT 0,
+			target_value  INT          NOT NULL DEFAULT 0,
+			updated_at    TIMESTAMP    NOT NULL DEFAULT NOW()
 		) ON COMMIT DROP
 	`)
 	if err != nil {
@@ -1258,9 +1093,9 @@ func (r *PostgresTxRepository) BatchUpsertProgressWithCOPY(ctx context.Context, 
 
 	// Step 2: Prepare COPY statement
 	stmt, err := r.tx.PrepareContext(ctx, pq.CopyIn(
-		"temp_user_goal_progress",
+		"temp_event_progress",
 		"user_id", "goal_id", "challenge_id", "namespace",
-		"progress", "status", "completed_at", "updated_at",
+		"progress", "progress_mode", "inc_value", "target_value", "updated_at",
 	))
 	if err != nil {
 		return errors.ErrDatabaseError("prepare COPY statement in transaction", err)
@@ -1268,16 +1103,17 @@ func (r *PostgresTxRepository) BatchUpsertProgressWithCOPY(ctx context.Context, 
 	defer func() { _ = stmt.Close() }()
 
 	// Step 3: Bulk load data
-	now := time.Now().UTC() // Always use UTC for consistency across timezones
-	for _, update := range updates {
+	now := time.Now().UTC()
+	for _, row := range rows {
 		_, err = stmt.ExecContext(ctx,
-			update.UserID,
-			update.GoalID,
-			update.ChallengeID,
-			update.Namespace,
-			update.Progress,
-			update.Status,
-			update.CompletedAt,
+			row.UserID,
+			row.GoalID,
+			row.ChallengeID,
+			row.Namespace,
+			row.Progress,
+			row.ProgressMode,
+			row.IncValue,
+			row.TargetValue,
 			now,
 		)
 		if err != nil {
@@ -1291,249 +1127,35 @@ func (r *PostgresTxRepository) BatchUpsertProgressWithCOPY(ctx context.Context, 
 		return errors.ErrDatabaseError("flush COPY to temp table in transaction", err)
 	}
 
-	// Step 5: Merge temp table into main table
+	// Step 5: UPDATE-only merge with SQL-side status computation
 	_, err = r.tx.ExecContext(ctx, `
-		INSERT INTO user_goal_progress (
-			user_id, goal_id, challenge_id, namespace,
-			progress, status, completed_at, updated_at
-		)
-		SELECT
-			user_id, goal_id, challenge_id, namespace,
-			progress, status, completed_at, NOW()
-		FROM temp_user_goal_progress
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			progress = EXCLUDED.progress,
-			status = EXCLUDED.status,
-			completed_at = EXCLUDED.completed_at,
+		UPDATE user_goal_progress AS ugp
+		SET
+			progress = CASE
+				WHEN temp.progress IS NOT NULL THEN temp.progress
+				ELSE ugp.progress + temp.inc_value
+			END,
+			status = CASE
+				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+					THEN 'completed'
+				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) > 0
+					THEN 'in_progress'
+				ELSE ugp.status
+			END,
+			completed_at = CASE
+				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+					 AND ugp.completed_at IS NULL THEN NOW()
+				ELSE ugp.completed_at
+			END,
 			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
+		FROM temp_event_progress AS temp
+		WHERE ugp.user_id = temp.user_id
+		  AND ugp.goal_id = temp.goal_id
+		  AND ugp.is_active = true
+		  AND ugp.status != 'claimed'
 	`)
 	if err != nil {
-		return errors.ErrDatabaseError("merge temp table into user_goal_progress in transaction", err)
-	}
-
-	return nil
-}
-
-// IncrementProgress atomically increments progress within a transaction.
-func (r *PostgresTxRepository) IncrementProgress(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int, isDailyIncrement bool) error {
-	if isDailyIncrement {
-		return r.incrementProgressDaily(ctx, userID, goalID, challengeID, namespace, delta, targetValue)
-	}
-	return r.incrementProgressRegular(ctx, userID, goalID, challengeID, namespace, delta, targetValue)
-}
-
-// incrementProgressRegular handles regular increments within a transaction
-func (r *PostgresTxRepository) incrementProgressRegular(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int) error {
-	query := `
-		INSERT INTO user_goal_progress (
-			user_id,
-			goal_id,
-			challenge_id,
-			namespace,
-			progress,
-			status,
-			completed_at,
-			updated_at
-		) VALUES (
-			$1, $2, $3, $4, $5::INT,
-			CASE WHEN $5::INT >= $6::INT THEN 'completed' ELSE 'in_progress' END,
-			CASE WHEN $5::INT >= $6::INT THEN NOW() ELSE NULL END,
-			NOW()
-		)
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			progress = user_goal_progress.progress + $5::INT,
-			status = CASE
-				WHEN user_goal_progress.progress + $5::INT >= $6::INT THEN 'completed'
-				ELSE 'in_progress'
-			END,
-			completed_at = CASE
-				WHEN user_goal_progress.progress + $5::INT >= $6::INT AND user_goal_progress.completed_at IS NULL
-					THEN NOW()
-				ELSE user_goal_progress.completed_at
-			END,
-			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
-	`
-
-	_, err := r.tx.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
-	if err != nil {
-		return errors.ErrDatabaseError("increment progress (regular) in transaction", err)
-	}
-
-	return nil
-}
-
-// incrementProgressDaily handles daily increments within a transaction
-func (r *PostgresTxRepository) incrementProgressDaily(ctx context.Context, userID, goalID, challengeID, namespace string, delta, targetValue int) error {
-	query := `
-		INSERT INTO user_goal_progress (
-			user_id,
-			goal_id,
-			challenge_id,
-			namespace,
-			progress,
-			status,
-			completed_at,
-			updated_at
-		) VALUES (
-			$1, $2, $3, $4, 1,
-			CASE WHEN 1 >= $6::INT THEN 'completed' ELSE 'in_progress' END,
-			CASE WHEN 1 >= $6::INT THEN NOW() ELSE NULL END,
-			NOW()
-		)
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			progress = CASE
-				WHEN DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
-					THEN user_goal_progress.progress
-				ELSE user_goal_progress.progress + $5::INT
-			END,
-			status = CASE
-				WHEN DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					CASE WHEN user_goal_progress.progress >= $6::INT THEN 'completed' ELSE 'in_progress' END
-				ELSE
-					CASE WHEN user_goal_progress.progress + $5::INT >= $6::INT THEN 'completed' ELSE 'in_progress' END
-			END,
-			completed_at = CASE
-				WHEN DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					user_goal_progress.completed_at
-				WHEN user_goal_progress.progress + $5::INT >= $6::INT AND user_goal_progress.completed_at IS NULL THEN
-					NOW()
-				ELSE
-					user_goal_progress.completed_at
-			END,
-			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
-	`
-
-	_, err := r.tx.ExecContext(ctx, query, userID, goalID, challengeID, namespace, delta, targetValue)
-	if err != nil {
-		return errors.ErrDatabaseError("increment progress (daily) in transaction", err)
-	}
-
-	return nil
-}
-
-// BatchIncrementProgress performs batch atomic increment within a transaction.
-func (r *PostgresTxRepository) BatchIncrementProgress(ctx context.Context, increments []ProgressIncrement) error {
-	if len(increments) == 0 {
-		return nil
-	}
-
-	// Build arrays for UNNEST
-	userIDs := make([]string, len(increments))
-	goalIDs := make([]string, len(increments))
-	challengeIDs := make([]string, len(increments))
-	namespaces := make([]string, len(increments))
-	deltas := make([]int, len(increments))
-	targetValues := make([]int, len(increments))
-	isDailyFlags := make([]bool, len(increments))
-
-	for i, inc := range increments {
-		userIDs[i] = inc.UserID
-		goalIDs[i] = inc.GoalID
-		challengeIDs[i] = inc.ChallengeID
-		namespaces[i] = inc.Namespace
-		deltas[i] = inc.Delta
-		targetValues[i] = inc.TargetValue
-		isDailyFlags[i] = inc.IsDailyIncrement
-	}
-
-	query := `
-		INSERT INTO user_goal_progress (
-			user_id,
-			goal_id,
-			challenge_id,
-			namespace,
-			progress,
-			status,
-			completed_at,
-			updated_at
-		)
-		SELECT
-			t.user_id,
-			t.goal_id,
-			t.challenge_id,
-			t.namespace,
-			t.delta,
-			initial.status,
-			initial.completed_at,
-			NOW()
-		FROM UNNEST(
-			$1::VARCHAR(100)[],
-			$2::VARCHAR(100)[],
-			$3::VARCHAR(100)[],
-			$4::VARCHAR(100)[],
-			$5::INT[],
-			$6::INT[],
-			$7::BOOLEAN[]
-		) AS t(user_id, goal_id, challenge_id, namespace, delta, target_value, is_daily)
-		CROSS JOIN LATERAL (
-			SELECT
-				CASE WHEN t.delta >= t.target_value THEN 'completed' ELSE 'in_progress' END as status,
-				CASE WHEN t.delta >= t.target_value THEN NOW() ELSE NULL END as completed_at
-		) AS initial
-		ON CONFLICT (user_id, goal_id) DO UPDATE SET
-			progress = CASE
-				WHEN (SELECT is_daily FROM UNNEST($7::BOOLEAN[], $2::VARCHAR(100)[]) AS u(is_daily, gid)
-				      WHERE u.gid = user_goal_progress.goal_id LIMIT 1) = true
-				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC')
-					THEN user_goal_progress.progress
-				ELSE
-					user_goal_progress.progress + (
-						SELECT delta FROM UNNEST($5::INT[], $2::VARCHAR(100)[]) AS u(delta, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					)
-			END,
-			status = CASE
-				WHEN (SELECT is_daily FROM UNNEST($7::BOOLEAN[], $2::VARCHAR(100)[]) AS u(is_daily, gid)
-				      WHERE u.gid = user_goal_progress.goal_id LIMIT 1) = true
-				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					CASE WHEN user_goal_progress.progress >= (
-						SELECT target_value FROM UNNEST($6::INT[], $2::VARCHAR(100)[]) AS u(target_value, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					) THEN 'completed' ELSE 'in_progress' END
-				ELSE
-					CASE WHEN user_goal_progress.progress + (
-						SELECT delta FROM UNNEST($5::INT[], $2::VARCHAR(100)[]) AS u(delta, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					) >= (
-						SELECT target_value FROM UNNEST($6::INT[], $2::VARCHAR(100)[]) AS u(target_value, gid)
-						WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-					) THEN 'completed' ELSE 'in_progress' END
-			END,
-			completed_at = CASE
-				WHEN (SELECT is_daily FROM UNNEST($7::BOOLEAN[], $2::VARCHAR(100)[]) AS u(is_daily, gid)
-				      WHERE u.gid = user_goal_progress.goal_id LIMIT 1) = true
-				     AND DATE(user_goal_progress.updated_at AT TIME ZONE 'UTC') = DATE(NOW() AT TIME ZONE 'UTC') THEN
-					user_goal_progress.completed_at
-				WHEN user_goal_progress.progress + (
-					SELECT delta FROM UNNEST($5::INT[], $2::VARCHAR(100)[]) AS u(delta, gid)
-					WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-				) >= (
-					SELECT target_value FROM UNNEST($6::INT[], $2::VARCHAR(100)[]) AS u(target_value, gid)
-					WHERE u.gid = user_goal_progress.goal_id LIMIT 1
-				) AND user_goal_progress.completed_at IS NULL THEN
-					NOW()
-				ELSE
-					user_goal_progress.completed_at
-			END,
-			updated_at = NOW()
-		WHERE user_goal_progress.status != 'claimed'
-	`
-
-	_, err := r.tx.ExecContext(ctx, query,
-		pq.Array(userIDs),
-		pq.Array(goalIDs),
-		pq.Array(challengeIDs),
-		pq.Array(namespaces),
-		pq.Array(deltas),
-		pq.Array(targetValues),
-		pq.Array(isDailyFlags),
-	)
-
-	if err != nil {
-		return errors.ErrDatabaseError("batch increment progress in transaction", err)
+		return errors.ErrDatabaseError("update user_goal_progress from temp table in transaction", err)
 	}
 
 	return nil

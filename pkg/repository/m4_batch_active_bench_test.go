@@ -109,7 +109,7 @@ func BenchmarkBatchUpsertGoalActive_ExistingRecords(b *testing.B) {
 				}
 			}
 
-			err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+			err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 			if err != nil {
 				b.Fatalf("Setup failed: %v", err)
 			}
@@ -191,7 +191,7 @@ func BenchmarkBatchUpsertGoalActive_MixedRecords(b *testing.B) {
 			}
 		}
 
-		err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+		err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 		if err != nil {
 			b.Fatalf("Setup failed: %v", err)
 		}
@@ -366,7 +366,7 @@ func BenchmarkM4_RandomSelection_Scenario(b *testing.B) {
 			}
 		}
 
-		err := repo.BatchUpsertProgressWithCOPY(ctx, setupGoals)
+		err := repo.BulkInsertWithCOPY(ctx, setupGoals)
 		if err != nil {
 			b.Fatalf("Setup failed: %v", err)
 		}
@@ -451,7 +451,7 @@ func BenchmarkM4_BatchSelection_Scenario(b *testing.B) {
 			}
 		}
 
-		err := repo.BatchUpsertProgressWithCOPY(ctx, poolGoals)
+		err := repo.BulkInsertWithCOPY(ctx, poolGoals)
 		if err != nil {
 			b.Fatalf("Setup failed: %v", err)
 		}
