@@ -249,29 +249,35 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 		}
 	}()
 
-	// Step 1: Create temporary table with unified schema
+	// Step 1: Create temporary table with unified schema + M5 rotation metadata
 	_, err = tx.ExecContext(ctx, `
 		CREATE TEMP TABLE IF NOT EXISTS temp_event_progress (
-			user_id       VARCHAR(100) NOT NULL,
-			goal_id       VARCHAR(100) NOT NULL,
-			challenge_id  VARCHAR(100) NOT NULL,
-			namespace     VARCHAR(100) NOT NULL,
-			progress      INT          NULL,
-			progress_mode VARCHAR(20)  NOT NULL,
-			inc_value     INT          NOT NULL DEFAULT 0,
-			target_value  INT          NOT NULL DEFAULT 0,
-			updated_at    TIMESTAMP    NOT NULL DEFAULT NOW()
+			user_id            VARCHAR(100) NOT NULL,
+			goal_id            VARCHAR(100) NOT NULL,
+			challenge_id       VARCHAR(100) NOT NULL,
+			namespace          VARCHAR(100) NOT NULL,
+			progress           INT          NULL,
+			progress_mode      VARCHAR(20)  NOT NULL,
+			inc_value          INT          NOT NULL DEFAULT 0,
+			target_value       INT          NOT NULL DEFAULT 0,
+			rotation_boundary  TIMESTAMP    NULL,
+			new_expires_at     TIMESTAMP    NULL,
+			allow_reselection  BOOLEAN      NOT NULL DEFAULT false,
+			reset_progress     BOOLEAN      NOT NULL DEFAULT true,
+			updated_at         TIMESTAMP    NOT NULL DEFAULT NOW()
 		) ON COMMIT DROP
 	`)
 	if err != nil {
 		return errors.ErrDatabaseError("create temp table for COPY", err)
 	}
 
-	// Step 2: Prepare COPY statement
+	// Step 2: Prepare COPY statement with rotation metadata columns
 	stmt, err := tx.PrepareContext(ctx, pq.CopyIn(
 		"temp_event_progress",
 		"user_id", "goal_id", "challenge_id", "namespace",
-		"progress", "progress_mode", "inc_value", "target_value", "updated_at",
+		"progress", "progress_mode", "inc_value", "target_value",
+		"rotation_boundary", "new_expires_at",
+		"allow_reselection", "reset_progress", "updated_at",
 	))
 	if err != nil {
 		return errors.ErrDatabaseError("prepare COPY statement", err)
@@ -290,6 +296,10 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 			row.ProgressMode,
 			row.IncValue,
 			row.TargetValue,
+			row.RotationBoundary, // nil = no rotation
+			row.NewExpiresAt,     // nil = no rotation
+			row.AllowReselection,
+			row.ResetProgress,
 			now,
 		)
 		if err != nil {
@@ -303,35 +313,194 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 		return errors.ErrDatabaseError("flush COPY to temp table", err)
 	}
 
-	// Step 5: UPDATE-only merge with SQL-side status computation
-	// Progress: absolute events use temp.progress, increment events use ugp.progress + temp.inc_value
-	// Status: computed from effective progress vs target_value
-	// Claimed protection: WHERE clause skips claimed goals
+	// Step 5: UPDATE-only merge with SQL-side rotation CASE logic (M5 Phase 5)
+	// Progress: COALESCE handles nil Progress for login events
+	// Baseline: 6-branch CASE for rotation detection and baseline reset
+	// Status: 8-branch CASE for rotation-aware status computation
+	// Claimed protection: WHERE allows claimed goals through when allow_reselection=true
 	_, err = tx.ExecContext(ctx, `
 		UPDATE user_goal_progress AS ugp
 		SET
-			progress = CASE
-				WHEN temp.progress IS NOT NULL THEN temp.progress
-				ELSE ugp.progress + temp.inc_value
+			-- Progress: absolute events use temp.progress, increment events use ugp.progress + temp.inc_value
+			progress = COALESCE(temp.progress, ugp.progress + temp.inc_value),
+
+			-- Baseline: rotation detection via SQL CASE
+			baseline_value = CASE
+				-- Absolute mode: baseline stays NULL
+				WHEN temp.progress_mode = 'absolute'
+					THEN ugp.baseline_value
+
+				-- Claimed + reselectable + stale: reset baseline for new period
+				WHEN temp.progress_mode = 'relative'
+				     AND ugp.status = 'claimed'
+				     AND temp.allow_reselection = true
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+					THEN COALESCE(temp.progress, ugp.progress + temp.inc_value) - temp.inc_value
+
+				-- Relative + rotated + reset_progress=true: reset baseline
+				WHEN temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND ugp.status != 'claimed'
+				     AND temp.reset_progress = true
+					THEN COALESCE(temp.progress, ugp.progress + temp.inc_value) - temp.inc_value
+
+				-- Relative + rotated + reset_progress=false: keep existing baseline
+				WHEN temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND ugp.status != 'claimed'
+				     AND temp.reset_progress = false
+					THEN ugp.baseline_value
+
+				-- Relative + first event (no baseline yet): initialize
+				WHEN temp.progress_mode = 'relative'
+				     AND ugp.baseline_value IS NULL
+					THEN COALESCE(temp.progress, ugp.progress + temp.inc_value) - temp.inc_value
+
+				-- Relative + not rotated: keep existing baseline
+				ELSE ugp.baseline_value
 			END,
+
+			-- Status: compute based on new progress vs baseline
 			status = CASE
-				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+				-- Claimed + allow_reselection + stale: reset for new period
+				WHEN ugp.status = 'claimed'
+				     AND temp.allow_reselection = true
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+					THEN 'not_started'
+
+				-- Claimed + not reselectable (or not stale): preserve
+				WHEN ugp.status = 'claimed'
+					THEN 'claimed'
+
+				-- Completed + NOT stale: preserve
+				WHEN ugp.status = 'completed'
+				     AND NOT (temp.progress_mode = 'relative'
+				              AND temp.rotation_boundary IS NOT NULL
+				              AND ugp.updated_at < temp.rotation_boundary)
 					THEN 'completed'
-				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) > 0
-					THEN 'in_progress'
-				ELSE ugp.status
+
+				-- Completed + stale + reset_progress=false: preserve completed
+				WHEN ugp.status = 'completed'
+				     AND temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND temp.reset_progress = false
+					THEN 'completed'
+
+				-- Absolute mode: simple threshold
+				WHEN temp.progress_mode = 'absolute'
+				     AND COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+					THEN 'completed'
+
+				-- Relative + rotated + reset_progress=true: check inc_value against target
+				WHEN temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND temp.reset_progress = true
+				     AND temp.inc_value >= temp.target_value
+					THEN 'completed'
+
+				-- Relative + rotated + reset_progress=false: check against existing baseline
+				WHEN temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND temp.reset_progress = false
+				     AND ugp.baseline_value IS NOT NULL
+				     AND (COALESCE(temp.progress, ugp.progress + temp.inc_value) - ugp.baseline_value) >= temp.target_value
+					THEN 'completed'
+
+				-- Relative + not rotated: check against existing baseline
+				WHEN temp.progress_mode = 'relative'
+				     AND NOT (temp.rotation_boundary IS NOT NULL AND ugp.updated_at < temp.rotation_boundary)
+				     AND ugp.baseline_value IS NOT NULL
+				     AND (COALESCE(temp.progress, ugp.progress + temp.inc_value) - ugp.baseline_value) >= temp.target_value
+					THEN 'completed'
+
+				-- Default: in_progress
+				ELSE 'in_progress'
 			END,
+
+			-- Completed timestamp
 			completed_at = CASE
-				WHEN COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
-					 AND ugp.completed_at IS NULL THEN NOW()
+				-- Claimed + reselectable + stale: clear for new period
+				WHEN ugp.status = 'claimed'
+				     AND temp.allow_reselection = true
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+					THEN NULL
+				WHEN ugp.status = 'claimed' THEN ugp.completed_at
+				-- Completed + stale + reset_progress=false: preserve
+				WHEN ugp.status = 'completed'
+				     AND temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND temp.reset_progress = false
+					THEN ugp.completed_at
+				WHEN ugp.status = 'completed'
+				     AND NOT (temp.progress_mode = 'relative'
+				              AND temp.rotation_boundary IS NOT NULL
+				              AND ugp.updated_at < temp.rotation_boundary)
+					THEN ugp.completed_at
+				-- Newly completed: absolute mode
+				WHEN temp.progress_mode = 'absolute'
+				     AND COALESCE(temp.progress, ugp.progress + temp.inc_value) >= temp.target_value
+				     AND ugp.completed_at IS NULL
+					THEN NOW()
+				-- Newly completed: relative + rotated + reset_progress=true
+				WHEN temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND temp.reset_progress = true
+				     AND temp.inc_value >= temp.target_value
+					THEN NOW()
+				-- Newly completed: relative + not rotated
+				WHEN temp.progress_mode = 'relative'
+				     AND NOT (temp.rotation_boundary IS NOT NULL AND ugp.updated_at < temp.rotation_boundary)
+				     AND ugp.baseline_value IS NOT NULL
+				     AND (COALESCE(temp.progress, ugp.progress + temp.inc_value) - ugp.baseline_value) >= temp.target_value
+				     AND ugp.completed_at IS NULL
+					THEN NOW()
+				-- Rotated + reset_progress=true but not completed: clear old completed_at
+				WHEN temp.progress_mode = 'relative'
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+				     AND temp.reset_progress = true
+					THEN NULL
 				ELSE ugp.completed_at
 			END,
+
+			-- Claimed_at: clear for reselectable goals on rotation
+			claimed_at = CASE
+				WHEN ugp.status = 'claimed'
+				     AND temp.allow_reselection = true
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+					THEN NULL
+				ELSE ugp.claimed_at
+			END,
+
+			-- Expires: update on rotation or initialize on first event
+			expires_at = CASE
+				WHEN temp.new_expires_at IS NOT NULL
+				     AND temp.rotation_boundary IS NOT NULL
+				     AND ugp.updated_at < temp.rotation_boundary
+					THEN temp.new_expires_at
+				WHEN temp.new_expires_at IS NOT NULL AND ugp.expires_at IS NULL
+					THEN temp.new_expires_at
+				ELSE ugp.expires_at
+			END,
+
 			updated_at = NOW()
+
 		FROM temp_event_progress AS temp
 		WHERE ugp.user_id = temp.user_id
 		  AND ugp.goal_id = temp.goal_id
 		  AND ugp.is_active = true
-		  AND ugp.status != 'claimed'
+		  AND NOT (ugp.status = 'claimed' AND temp.allow_reselection = false)
 	`)
 	if err != nil {
 		return errors.ErrDatabaseError("update user_goal_progress from temp table", err)

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/AccelByte/extend-challenge-common/pkg/domain"
 )
@@ -18,6 +19,13 @@ type CopyRow struct {
 	ProgressMode string // "absolute" or "relative"
 	IncValue     int    // Increment delta (used when Progress is nil)
 	TargetValue  int    // Target value for SQL-side completion check
+
+	// M5 Phase 5: Rotation metadata for SQL CASE rotation logic.
+	// Zero values are safe — all rotation SQL branches guard on rotation_boundary IS NOT NULL.
+	RotationBoundary *time.Time // Last rotation boundary (nil = no rotation)
+	NewExpiresAt     *time.Time // Next expiry timestamp (nil = no rotation)
+	AllowReselection bool       // Allow claimed goals to reset on rotation
+	ResetProgress    bool       // Reset progress on rotation (default true in config)
 }
 
 // GoalRepository defines the interface for managing user goal progress in the database.
