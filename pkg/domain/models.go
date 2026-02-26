@@ -135,6 +135,9 @@ type UserGoalProgress struct {
 
 	// M5: System rotation control (added now for forward compatibility)
 	ExpiresAt *time.Time `json:"expiresAt,omitempty" db:"expires_at"`
+
+	// M5: Baseline stat value for relative progress (NULL = absolute mode or not yet initialized)
+	BaselineValue *int `json:"baselineValue,omitempty" db:"baseline_value"`
 }
 
 // GoalStatus represents the current state of a user's progress on a goal.

@@ -30,7 +30,7 @@ func (r *PostgresGoalRepository) GetProgress(ctx context.Context, userID, goalID
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = $2
 	`
@@ -50,6 +50,7 @@ func (r *PostgresGoalRepository) GetProgress(ctx context.Context, userID, goalID
 		&progress.IsActive,
 		&progress.AssignedAt,
 		&progress.ExpiresAt,
+		&progress.BaselineValue,
 	)
 
 	if err == sql.ErrNoRows {
@@ -69,7 +70,7 @@ func (r *PostgresGoalRepository) GetUserProgress(ctx context.Context, userID str
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1
 	`
@@ -96,7 +97,7 @@ func (r *PostgresGoalRepository) GetChallengeProgress(ctx context.Context, userI
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND challenge_id = $2
 	`
@@ -551,7 +552,7 @@ func (r *PostgresGoalRepository) GetGoalsByIDs(ctx context.Context, userID strin
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = ANY($2)
 		ORDER BY created_at ASC
@@ -575,14 +576,14 @@ func (r *PostgresGoalRepository) BulkInsert(ctx context.Context, progresses []*d
 		return nil
 	}
 
-	// Build values for bulk insert (11 parameters per row)
+	// Build values for bulk insert (12 parameters per row)
 	valueStrings := make([]string, 0, len(progresses))
-	valueArgs := make([]interface{}, 0, len(progresses)*11)
+	valueArgs := make([]interface{}, 0, len(progresses)*12)
 
 	for i, p := range progresses {
 		valueStrings = append(valueStrings, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d)",
-			i*11+1, i*11+2, i*11+3, i*11+4, i*11+5, i*11+6, i*11+7, i*11+8, i*11+9, i*11+10, i*11+11,
+			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d, $%d)",
+			i*12+1, i*12+2, i*12+3, i*12+4, i*12+5, i*12+6, i*12+7, i*12+8, i*12+9, i*12+10, i*12+11, i*12+12,
 		))
 
 		valueArgs = append(valueArgs,
@@ -597,6 +598,7 @@ func (r *PostgresGoalRepository) BulkInsert(ctx context.Context, progresses []*d
 			p.IsActive,
 			p.AssignedAt,
 			p.ExpiresAt,
+			p.BaselineValue,
 		)
 	}
 
@@ -606,7 +608,7 @@ func (r *PostgresGoalRepository) BulkInsert(ctx context.Context, progresses []*d
 			user_id, goal_id, challenge_id, namespace,
 			progress, status, completed_at, claimed_at,
 			created_at, updated_at,
-			is_active, assigned_at, expires_at
+			is_active, assigned_at, expires_at, baseline_value
 		) VALUES %s
 		ON CONFLICT (user_id, goal_id) DO NOTHING
 	`, strings.Join(valueStrings, ","))
@@ -677,7 +679,8 @@ func (r *PostgresGoalRepository) BulkInsertWithCOPY(ctx context.Context, progres
 			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			is_active BOOLEAN NOT NULL DEFAULT false,
 			assigned_at TIMESTAMP NULL,
-			expires_at TIMESTAMP NULL
+			expires_at TIMESTAMP NULL,
+			baseline_value INT NULL
 		) ON COMMIT DROP
 	`)
 	if err != nil {
@@ -690,7 +693,7 @@ func (r *PostgresGoalRepository) BulkInsertWithCOPY(ctx context.Context, progres
 		"user_id", "goal_id", "challenge_id", "namespace",
 		"progress", "status", "completed_at", "claimed_at",
 		"created_at", "updated_at",
-		"is_active", "assigned_at", "expires_at",
+		"is_active", "assigned_at", "expires_at", "baseline_value",
 	))
 	if err != nil {
 		return errors.ErrDatabaseError("prepare COPY statement for BulkInsert", err)
@@ -714,6 +717,7 @@ func (r *PostgresGoalRepository) BulkInsertWithCOPY(ctx context.Context, progres
 			p.IsActive,
 			p.AssignedAt,
 			p.ExpiresAt,
+			p.BaselineValue,
 		)
 		if err != nil {
 			return errors.ErrDatabaseError("execute COPY row for BulkInsert", err)
@@ -732,13 +736,13 @@ func (r *PostgresGoalRepository) BulkInsertWithCOPY(ctx context.Context, progres
 			user_id, goal_id, challenge_id, namespace,
 			progress, status, completed_at, claimed_at,
 			created_at, updated_at,
-			is_active, assigned_at, expires_at
+			is_active, assigned_at, expires_at, baseline_value
 		)
 		SELECT
 			user_id, goal_id, challenge_id, namespace,
 			progress, status, completed_at, claimed_at,
 			created_at, updated_at,
-			is_active, assigned_at, expires_at
+			is_active, assigned_at, expires_at, baseline_value
 		FROM temp_bulk_insert
 		ON CONFLICT (user_id, goal_id) DO NOTHING
 	`)
@@ -933,7 +937,7 @@ func (r *PostgresGoalRepository) GetActiveGoals(ctx context.Context, userID stri
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND is_active = true
 		ORDER BY challenge_id, goal_id
@@ -983,6 +987,7 @@ func (r *PostgresGoalRepository) scanProgressRows(rows *sql.Rows) ([]*domain.Use
 			&progress.IsActive,
 			&progress.AssignedAt,
 			&progress.ExpiresAt,
+			&progress.BaselineValue,
 		)
 		if err != nil {
 			return nil, errors.ErrDatabaseError("scan progress row", err)
@@ -1008,7 +1013,7 @@ func (r *PostgresTxRepository) GetProgress(ctx context.Context, userID, goalID s
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = $2
 	`
@@ -1028,6 +1033,7 @@ func (r *PostgresTxRepository) GetProgress(ctx context.Context, userID, goalID s
 		&progress.IsActive,
 		&progress.AssignedAt,
 		&progress.ExpiresAt,
+		&progress.BaselineValue,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1046,7 +1052,7 @@ func (r *PostgresTxRepository) GetProgressForUpdate(ctx context.Context, userID,
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = $2
 		FOR UPDATE
@@ -1067,6 +1073,7 @@ func (r *PostgresTxRepository) GetProgressForUpdate(ctx context.Context, userID,
 		&progress.IsActive,
 		&progress.AssignedAt,
 		&progress.ExpiresAt,
+		&progress.BaselineValue,
 	)
 
 	if err == sql.ErrNoRows {
@@ -1086,7 +1093,7 @@ func (r *PostgresTxRepository) GetUserProgress(ctx context.Context, userID strin
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1
 	`
@@ -1113,7 +1120,7 @@ func (r *PostgresTxRepository) GetChallengeProgress(ctx context.Context, userID,
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND challenge_id = $2
 	`
@@ -1572,7 +1579,7 @@ func (r *PostgresTxRepository) GetGoalsByIDs(ctx context.Context, userID string,
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND goal_id = ANY($2)
 		ORDER BY created_at ASC
@@ -1596,14 +1603,14 @@ func (r *PostgresTxRepository) BulkInsert(ctx context.Context, progresses []*dom
 		return nil
 	}
 
-	// Build values for bulk insert (11 parameters per row)
+	// Build values for bulk insert (12 parameters per row)
 	valueStrings := make([]string, 0, len(progresses))
-	valueArgs := make([]interface{}, 0, len(progresses)*11)
+	valueArgs := make([]interface{}, 0, len(progresses)*12)
 
 	for i, p := range progresses {
 		valueStrings = append(valueStrings, fmt.Sprintf(
-			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d)",
-			i*11+1, i*11+2, i*11+3, i*11+4, i*11+5, i*11+6, i*11+7, i*11+8, i*11+9, i*11+10, i*11+11,
+			"($%d, $%d, $%d, $%d, $%d, $%d, $%d, $%d, NOW(), NOW(), $%d, $%d, $%d, $%d)",
+			i*12+1, i*12+2, i*12+3, i*12+4, i*12+5, i*12+6, i*12+7, i*12+8, i*12+9, i*12+10, i*12+11, i*12+12,
 		))
 
 		valueArgs = append(valueArgs,
@@ -1618,6 +1625,7 @@ func (r *PostgresTxRepository) BulkInsert(ctx context.Context, progresses []*dom
 			p.IsActive,
 			p.AssignedAt,
 			p.ExpiresAt,
+			p.BaselineValue,
 		)
 	}
 
@@ -1627,7 +1635,7 @@ func (r *PostgresTxRepository) BulkInsert(ctx context.Context, progresses []*dom
 			user_id, goal_id, challenge_id, namespace,
 			progress, status, completed_at, claimed_at,
 			created_at, updated_at,
-			is_active, assigned_at, expires_at
+			is_active, assigned_at, expires_at, baseline_value
 		) VALUES %s
 		ON CONFLICT (user_id, goal_id) DO NOTHING
 	`, strings.Join(valueStrings, ","))
@@ -1674,7 +1682,8 @@ func (r *PostgresTxRepository) BulkInsertWithCOPY(ctx context.Context, progresse
 			updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
 			is_active BOOLEAN NOT NULL DEFAULT false,
 			assigned_at TIMESTAMP NULL,
-			expires_at TIMESTAMP NULL
+			expires_at TIMESTAMP NULL,
+			baseline_value INT NULL
 		) ON COMMIT DROP
 	`)
 	if err != nil {
@@ -1687,7 +1696,7 @@ func (r *PostgresTxRepository) BulkInsertWithCOPY(ctx context.Context, progresse
 		"user_id", "goal_id", "challenge_id", "namespace",
 		"progress", "status", "completed_at", "claimed_at",
 		"created_at", "updated_at",
-		"is_active", "assigned_at", "expires_at",
+		"is_active", "assigned_at", "expires_at", "baseline_value",
 	))
 	if err != nil {
 		return errors.ErrDatabaseError("prepare COPY statement for BulkInsert in transaction", err)
@@ -1711,6 +1720,7 @@ func (r *PostgresTxRepository) BulkInsertWithCOPY(ctx context.Context, progresse
 			p.IsActive,
 			p.AssignedAt,
 			p.ExpiresAt,
+			p.BaselineValue,
 		)
 		if err != nil {
 			return errors.ErrDatabaseError("execute COPY row for BulkInsert in transaction", err)
@@ -1729,13 +1739,13 @@ func (r *PostgresTxRepository) BulkInsertWithCOPY(ctx context.Context, progresse
 			user_id, goal_id, challenge_id, namespace,
 			progress, status, completed_at, claimed_at,
 			created_at, updated_at,
-			is_active, assigned_at, expires_at
+			is_active, assigned_at, expires_at, baseline_value
 		)
 		SELECT
 			user_id, goal_id, challenge_id, namespace,
 			progress, status, completed_at, claimed_at,
 			created_at, updated_at,
-			is_active, assigned_at, expires_at
+			is_active, assigned_at, expires_at, baseline_value
 		FROM temp_bulk_insert
 		ON CONFLICT (user_id, goal_id) DO NOTHING
 	`)
@@ -1924,7 +1934,7 @@ func (r *PostgresTxRepository) GetActiveGoals(ctx context.Context, userID string
 	query := `
 		SELECT user_id, goal_id, challenge_id, namespace, progress, status,
 		       completed_at, claimed_at, created_at, updated_at,
-		       is_active, assigned_at, expires_at
+		       is_active, assigned_at, expires_at, baseline_value
 		FROM user_goal_progress
 		WHERE user_id = $1 AND is_active = true
 		ORDER BY challenge_id, goal_id

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -355,6 +356,76 @@ func TestUserGoalProgress_MeetsRequirement(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUserGoalProgress_BaselineValue(t *testing.T) {
+	t.Run("nil by default", func(t *testing.T) {
+		p := &UserGoalProgress{
+			UserID: "user1",
+			GoalID: "goal1",
+		}
+		if p.BaselineValue != nil {
+			t.Errorf("expected BaselineValue to be nil, got %v", *p.BaselineValue)
+		}
+	})
+
+	t.Run("can be set to a value", func(t *testing.T) {
+		val := 150
+		p := &UserGoalProgress{
+			UserID:        "user1",
+			GoalID:        "goal1",
+			BaselineValue: &val,
+		}
+		if p.BaselineValue == nil || *p.BaselineValue != 150 {
+			t.Errorf("expected BaselineValue to be 150, got %v", p.BaselineValue)
+		}
+	})
+
+	t.Run("omitted from JSON when nil", func(t *testing.T) {
+		p := &UserGoalProgress{
+			UserID:   "user1",
+			GoalID:   "goal1",
+			Status:   GoalStatusNotStarted,
+			IsActive: true,
+		}
+		data, err := json.Marshal(p)
+		if err != nil {
+			t.Fatalf("failed to marshal: %v", err)
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		if _, exists := m["baselineValue"]; exists {
+			t.Error("expected baselineValue to be omitted from JSON when nil")
+		}
+	})
+
+	t.Run("included in JSON when set", func(t *testing.T) {
+		val := 42
+		p := &UserGoalProgress{
+			UserID:        "user1",
+			GoalID:        "goal1",
+			Status:        GoalStatusInProgress,
+			IsActive:      true,
+			BaselineValue: &val,
+		}
+		data, err := json.Marshal(p)
+		if err != nil {
+			t.Fatalf("failed to marshal: %v", err)
+		}
+		var m map[string]interface{}
+		if err := json.Unmarshal(data, &m); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+		v, exists := m["baselineValue"]
+		if !exists {
+			t.Fatal("expected baselineValue to be present in JSON")
+		}
+		if v.(float64) != 42 {
+			t.Errorf("expected baselineValue to be 42, got %v", v)
+		}
+	})
 }
 
 func TestUserGoalProgress_StatusTransitions(t *testing.T) {
