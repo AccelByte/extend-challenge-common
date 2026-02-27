@@ -366,11 +366,16 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 			-- Status: compute based on new progress vs baseline
 			status = CASE
 				-- Claimed + allow_reselection + stale: reset for new period
+				-- May immediately re-complete if inc_value >= target
 				WHEN ugp.status = 'claimed'
 				     AND temp.allow_reselection = true
 				     AND temp.rotation_boundary IS NOT NULL
 				     AND ugp.updated_at < temp.rotation_boundary
-					THEN 'not_started'
+					THEN CASE
+						WHEN temp.inc_value >= temp.target_value THEN 'completed'
+						WHEN temp.inc_value > 0 THEN 'in_progress'
+						ELSE 'not_started'
+					END
 
 				-- Claimed + not reselectable (or not stale): preserve
 				WHEN ugp.status = 'claimed'
@@ -433,12 +438,15 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 
 			-- Completed timestamp
 			completed_at = CASE
-				-- Claimed + reselectable + stale: clear for new period
+				-- Claimed + reselectable + stale: clear or set based on re-completion
 				WHEN ugp.status = 'claimed'
 				     AND temp.allow_reselection = true
 				     AND temp.rotation_boundary IS NOT NULL
 				     AND ugp.updated_at < temp.rotation_boundary
-					THEN NULL
+					THEN CASE
+						WHEN temp.inc_value >= temp.target_value THEN NOW()
+						ELSE NULL
+					END
 				WHEN ugp.status = 'claimed' THEN ugp.completed_at
 				-- Completed + stale + reset_progress=false: preserve
 				WHEN ugp.status = 'completed'
