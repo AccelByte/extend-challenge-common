@@ -420,6 +420,13 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 				     AND (COALESCE(temp.progress, ugp.progress + temp.inc_value) - ugp.baseline_value) >= temp.target_value
 					THEN 'completed'
 
+				-- Relative + first event (baseline not yet set): check inc_value against target
+				-- On first event, baseline will be set to (progress - inc_value), so displayed = inc_value
+				WHEN temp.progress_mode = 'relative'
+				     AND ugp.baseline_value IS NULL
+				     AND temp.inc_value >= temp.target_value
+					THEN 'completed'
+
 				-- Default: in_progress
 				ELSE 'in_progress'
 			END,
@@ -463,6 +470,11 @@ func (r *PostgresGoalRepository) BatchUpsertProgressWithCOPY(ctx context.Context
 				     AND ugp.baseline_value IS NOT NULL
 				     AND (COALESCE(temp.progress, ugp.progress + temp.inc_value) - ugp.baseline_value) >= temp.target_value
 				     AND ugp.completed_at IS NULL
+					THEN NOW()
+				-- Newly completed: relative + first event (baseline not yet set)
+				WHEN temp.progress_mode = 'relative'
+				     AND ugp.baseline_value IS NULL
+				     AND temp.inc_value >= temp.target_value
 					THEN NOW()
 				-- Rotated + reset_progress=true but not completed: clear old completed_at
 				WHEN temp.progress_mode = 'relative'
