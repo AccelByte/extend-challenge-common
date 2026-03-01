@@ -378,8 +378,8 @@ func TestRotation_ClaimedGoalResetWithAllowReselection(t *testing.T) {
 	}
 
 	row := readRotationRow(t, ctx, db, userID, goalID)
-	if row.Status != "not_started" {
-		t.Errorf("status = %q, want not_started (reset with allow_reselection)", row.Status)
+	if row.Status != "in_progress" {
+		t.Errorf("status = %q, want in_progress (reset with allow_reselection, inc_value > 0)", row.Status)
 	}
 	if !row.BaselineValue.Valid || row.BaselineValue.Int64 != 115 {
 		t.Errorf("baseline_value = %v, want 115 (120-5)", row.BaselineValue)

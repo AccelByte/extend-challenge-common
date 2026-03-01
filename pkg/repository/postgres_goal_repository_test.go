@@ -36,7 +36,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 		return nil
 	}
 
-	// Create table (M3 schema with is_active, assigned_at, expires_at)
+	// Create table (M5 schema with is_active, assigned_at, expires_at, baseline_value)
 	_, err = db.Exec(`
 		CREATE TABLE IF NOT EXISTS user_goal_progress (
 			user_id VARCHAR(100) NOT NULL,
@@ -52,12 +52,19 @@ func setupTestDB(t *testing.T) *sql.DB {
 			is_active BOOLEAN NOT NULL DEFAULT true,
 			assigned_at TIMESTAMP NULL,
 			expires_at TIMESTAMP NULL,
+			baseline_value INT NULL,
 			PRIMARY KEY (user_id, goal_id),
 			CONSTRAINT check_status CHECK (status IN ('not_started', 'in_progress', 'completed', 'claimed')),
 			CONSTRAINT check_progress_non_negative CHECK (progress >= 0),
 			CONSTRAINT check_claimed_implies_completed CHECK (claimed_at IS NULL OR completed_at IS NOT NULL)
 		)
 	`)
+	if err != nil {
+		t.Fatalf("Failed to create table: %v", err)
+	}
+
+	// Add baseline_value column if missing (for pre-M5 table)
+	_, err = db.Exec(`ALTER TABLE user_goal_progress ADD COLUMN IF NOT EXISTS baseline_value INT NULL`)
 	if err != nil {
 		t.Fatalf("Failed to create table: %v", err)
 	}
