@@ -108,11 +108,11 @@ type GoalRepository interface {
 	// M6: Cleanup methods
 
 	// DeleteExpiredRows deletes expired rows in batches using CTE + PK pattern.
-	// Deletes rows where expires_at < cutoff, limited to batchSize per call.
-	DeleteExpiredRows(ctx context.Context, cutoff time.Time, batchSize int) (int64, error)
+	// Deletes rows where expires_at < cutoff AND namespace matches, limited to batchSize per call.
+	DeleteExpiredRows(ctx context.Context, namespace string, cutoff time.Time, batchSize int) (int64, error)
 
-	// DeleteUserData deletes all goal progress data for a specific user (GDPR compliance).
-	DeleteUserData(ctx context.Context, userID string) (int64, error)
+	// DeleteUserData deletes all goal progress data for a specific user within a namespace (GDPR compliance).
+	DeleteUserData(ctx context.Context, namespace string, userID string) (int64, error)
 }
 
 // TxRepository represents a transactional repository that supports commit/rollback.

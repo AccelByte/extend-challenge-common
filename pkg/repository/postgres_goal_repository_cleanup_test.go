@@ -28,7 +28,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 			t.Fatalf("insert expired row: %v", err)
 		}
 
-		deleted, err := repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows: %v", err)
 		}
@@ -50,7 +50,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 			t.Fatalf("insert row: %v", err)
 		}
 
-		deleted, err := repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows: %v", err)
 		}
@@ -72,7 +72,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 		}
 
 		// Use very aggressive cutoff that would catch everything if NULL wasn't excluded
-		deleted, err := repo.DeleteExpiredRows(ctx, now.Add(24*time.Hour), 1000)
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", now.Add(24*time.Hour), 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows: %v", err)
 		}
@@ -107,7 +107,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 			}
 		}
 
-		deleted, err := repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows: %v", err)
 		}
@@ -137,7 +137,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 			t.Fatalf("insert boundary row: %v", err)
 		}
 
-		deleted, err := repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows: %v", err)
 		}
@@ -161,7 +161,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 		}
 
 		// First batch: should delete exactly 1000
-		deleted, err := repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows batch 1: %v", err)
 		}
@@ -170,7 +170,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 		}
 
 		// Second batch: should delete another 1000
-		deleted, err = repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err = repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows batch 2: %v", err)
 		}
@@ -179,7 +179,7 @@ func TestDeleteExpiredRows(t *testing.T) {
 		}
 
 		// Third batch: should delete remaining 500
-		deleted, err = repo.DeleteExpiredRows(ctx, cutoff, 1000)
+		deleted, err = repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
 		if err != nil {
 			t.Fatalf("DeleteExpiredRows batch 3: %v", err)
 		}
@@ -219,7 +219,7 @@ func TestDeleteUserData(t *testing.T) {
 		}
 
 		// Delete user-A data
-		deleted, err := repo.DeleteUserData(ctx, "user-A")
+		deleted, err := repo.DeleteUserData(ctx, "ns", "user-A")
 		if err != nil {
 			t.Fatalf("DeleteUserData: %v", err)
 		}
@@ -248,7 +248,7 @@ func TestDeleteUserData(t *testing.T) {
 	})
 
 	t.Run("empty user returns 0 and no error", func(t *testing.T) {
-		deleted, err := repo.DeleteUserData(ctx, "nonexistent-user")
+		deleted, err := repo.DeleteUserData(ctx, "ns", "nonexistent-user")
 		if err != nil {
 			t.Fatalf("DeleteUserData: %v", err)
 		}
@@ -256,4 +256,53 @@ func TestDeleteUserData(t *testing.T) {
 			t.Errorf("expected 0 deleted, got %d", deleted)
 		}
 	})
+}
+
+// TestBatchUpsertProgressWithCOPY_SkipsExpiredRows verifies that the COPY-based upsert
+// does not update rows that have already expired (expires_at in the past).
+func TestBatchUpsertProgressWithCOPY_SkipsExpiredRows(t *testing.T) {
+	db := setupTestDB(t)
+	defer cleanupTestDB(t, db)
+
+	repo := NewPostgresGoalRepository(db)
+	ctx := context.Background()
+	pastTime := time.Now().Add(-24 * time.Hour)
+
+	// Insert a row with expires_at in the past
+	_, err := db.Exec(`
+		INSERT INTO user_goal_progress (user_id, goal_id, challenge_id, namespace, progress, status, is_active, expires_at)
+		VALUES ('user-expired', 'goal-expired', 'ch1', 'ns', 5, 'in_progress', true, $1)
+	`, pastTime)
+	if err != nil {
+		t.Fatalf("insert expired row: %v", err)
+	}
+
+	// Try to update the expired row via BatchUpsertProgressWithCOPY
+	targetVal := 10
+	rows := []CopyRow{
+		{
+			UserID:       "user-expired",
+			GoalID:       "goal-expired",
+			ChallengeID:  "ch1",
+			Namespace:    "ns",
+			Progress:     &targetVal,
+			ProgressMode: "absolute",
+			TargetValue:  100,
+		},
+	}
+
+	err = repo.BatchUpsertProgressWithCOPY(ctx, rows)
+	if err != nil {
+		t.Fatalf("BatchUpsertProgressWithCOPY: %v", err)
+	}
+
+	// Verify the row was NOT updated (progress should still be 5)
+	var progress int
+	err = db.QueryRow("SELECT progress FROM user_goal_progress WHERE user_id = 'user-expired' AND goal_id = 'goal-expired'").Scan(&progress)
+	if err != nil {
+		t.Fatalf("query progress: %v", err)
+	}
+	if progress != 5 {
+		t.Errorf("expected progress=5 (unchanged), got %d — expired row should not be updated", progress)
+	}
 }
