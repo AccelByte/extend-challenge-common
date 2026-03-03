@@ -1811,6 +1811,51 @@ func (r *PostgresTxRepository) GetActiveGoals(ctx context.Context, userID string
 }
 
 // BeginTx is not supported within a transaction.
+// DeleteExpiredRows deletes expired rows within a transaction.
+func (r *PostgresTxRepository) DeleteExpiredRows(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	query := `
+		WITH expired AS (
+			SELECT user_id, goal_id
+			FROM user_goal_progress
+			WHERE expires_at IS NOT NULL AND expires_at < $1
+			LIMIT $2
+		)
+		DELETE FROM user_goal_progress
+		USING expired
+		WHERE user_goal_progress.user_id = expired.user_id
+		  AND user_goal_progress.goal_id = expired.goal_id
+	`
+
+	result, err := r.tx.ExecContext(ctx, query, cutoff, batchSize)
+	if err != nil {
+		return 0, errors.ErrDatabaseError("delete expired rows in transaction", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, errors.ErrDatabaseError("check rows affected for delete expired in transaction", err)
+	}
+
+	return deleted, nil
+}
+
+// DeleteUserData deletes all goal progress data for a specific user within a transaction (GDPR compliance).
+func (r *PostgresTxRepository) DeleteUserData(ctx context.Context, userID string) (int64, error) {
+	query := `DELETE FROM user_goal_progress WHERE user_id = $1`
+
+	result, err := r.tx.ExecContext(ctx, query, userID)
+	if err != nil {
+		return 0, errors.ErrDatabaseError("delete user data in transaction", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, errors.ErrDatabaseError("check rows affected for delete user data in transaction", err)
+	}
+
+	return deleted, nil
+}
+
 func (r *PostgresTxRepository) BeginTx(ctx context.Context) (TxRepository, error) {
 	return nil, fmt.Errorf("cannot begin nested transaction")
 }
