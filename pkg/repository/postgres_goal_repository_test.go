@@ -78,6 +78,16 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("Failed to create index: %v", err)
 	}
 
+	// Create partial index for expired row cleanup (M6)
+	_, err = db.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_user_goal_progress_expires_at
+		ON user_goal_progress(expires_at)
+		WHERE expires_at IS NOT NULL
+	`)
+	if err != nil {
+		t.Fatalf("Failed to create expires_at index: %v", err)
+	}
+
 	return db
 }
 

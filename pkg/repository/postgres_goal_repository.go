@@ -979,6 +979,54 @@ func (r *PostgresGoalRepository) GetActiveGoals(ctx context.Context, userID stri
 	return r.scanProgressRows(rows)
 }
 
+// DeleteExpiredRows deletes expired rows in batches using CTE + PK pattern.
+// It deletes rows where expires_at < cutoff, limited to batchSize per call.
+// Returns the number of rows deleted.
+func (r *PostgresGoalRepository) DeleteExpiredRows(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	query := `
+		WITH expired AS (
+			SELECT user_id, goal_id
+			FROM user_goal_progress
+			WHERE expires_at IS NOT NULL AND expires_at < $1
+			LIMIT $2
+		)
+		DELETE FROM user_goal_progress
+		USING expired
+		WHERE user_goal_progress.user_id = expired.user_id
+		  AND user_goal_progress.goal_id = expired.goal_id
+	`
+
+	result, err := r.db.ExecContext(ctx, query, cutoff, batchSize)
+	if err != nil {
+		return 0, errors.ErrDatabaseError("delete expired rows", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, errors.ErrDatabaseError("check rows affected for delete expired", err)
+	}
+
+	return deleted, nil
+}
+
+// DeleteUserData deletes all goal progress data for a specific user (GDPR compliance).
+// Returns the number of rows deleted.
+func (r *PostgresGoalRepository) DeleteUserData(ctx context.Context, userID string) (int64, error) {
+	query := `DELETE FROM user_goal_progress WHERE user_id = $1`
+
+	result, err := r.db.ExecContext(ctx, query, userID)
+	if err != nil {
+		return 0, errors.ErrDatabaseError("delete user data", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, errors.ErrDatabaseError("check rows affected for delete user data", err)
+	}
+
+	return deleted, nil
+}
+
 // BeginTx starts a database transaction and returns a transactional repository.
 func (r *PostgresGoalRepository) BeginTx(ctx context.Context) (TxRepository, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
