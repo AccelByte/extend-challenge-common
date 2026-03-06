@@ -146,6 +146,46 @@ func TestDeleteExpiredRows(t *testing.T) {
 		}
 	})
 
+	t.Run("boundary: row exactly at cutoff is NOT deleted", func(t *testing.T) {
+		_, _ = db.Exec("TRUNCATE TABLE user_goal_progress")
+
+		// Row with expires_at exactly at cutoff (SQL uses < $1, so this should NOT be deleted)
+		_, err := db.Exec(`
+			INSERT INTO user_goal_progress (user_id, goal_id, challenge_id, namespace, progress, status, expires_at)
+			VALUES ('user-exact-1', 'goal-exact-1', 'ch1', 'ns', 0, 'not_started', $1)
+		`, cutoff)
+		if err != nil {
+			t.Fatalf("insert exact-cutoff row: %v", err)
+		}
+
+		// Row with expires_at 1 microsecond before cutoff (should be deleted)
+		_, err = db.Exec(`
+			INSERT INTO user_goal_progress (user_id, goal_id, challenge_id, namespace, progress, status, expires_at)
+			VALUES ('user-exact-2', 'goal-exact-2', 'ch1', 'ns', 0, 'not_started', $1)
+		`, cutoff.Add(-time.Microsecond))
+		if err != nil {
+			t.Fatalf("insert before-cutoff row: %v", err)
+		}
+
+		deleted, err := repo.DeleteExpiredRows(ctx, "ns", cutoff, 1000)
+		if err != nil {
+			t.Fatalf("DeleteExpiredRows: %v", err)
+		}
+		if deleted != 1 {
+			t.Errorf("expected 1 deleted (only the row before cutoff), got %d", deleted)
+		}
+
+		// Verify exact-cutoff row survives
+		var count int
+		err = db.QueryRow("SELECT COUNT(*) FROM user_goal_progress WHERE user_id = 'user-exact-1'").Scan(&count)
+		if err != nil {
+			t.Fatalf("count exact-cutoff row: %v", err)
+		}
+		if count != 1 {
+			t.Errorf("expected exact-cutoff row to survive, got count=%d", count)
+		}
+	})
+
 	t.Run("batch limit: respects batchSize", func(t *testing.T) {
 		_, _ = db.Exec("TRUNCATE TABLE user_goal_progress")
 
