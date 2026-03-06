@@ -13,8 +13,8 @@ TEST_DB_PASSWORD := postgres
 TEST_DB_NAME := challenge_db
 TEST_DB_DSN := postgres://$(TEST_DB_USER):$(TEST_DB_PASSWORD)@$(TEST_DB_HOST):$(TEST_DB_PORT)/$(TEST_DB_NAME)?sslmode=disable
 
-# Migration file location (local to this repo)
-MIGRATION_FILE := migrations/001_create_user_goal_progress.up.sql
+# Migration files from the service repo (adjacent in the suite)
+MIGRATION_DIR := ../extend-challenge-service/migrations
 
 .PHONY: lint lint-fix test test-coverage test-all
 .PHONY: db-setup db-teardown db-status db-clean
@@ -69,9 +69,9 @@ test-all:
 # Database setup for integration tests and benchmarks
 db-setup:
 	@echo "🐘 Setting up PostgreSQL test database..."
-	@if [ ! -f "$(MIGRATION_FILE)" ]; then \
-		echo "❌ Migration file not found: $(MIGRATION_FILE)"; \
-		echo "   Please ensure the migration file exists in the migrations/ directory"; \
+	@if [ ! -d "$(MIGRATION_DIR)" ]; then \
+		echo "❌ Migration directory not found: $(MIGRATION_DIR)"; \
+		echo "   Please ensure extend-challenge-service is cloned alongside this repo"; \
 		exit 1; \
 	fi
 	@docker-compose up -d postgres-test
@@ -85,12 +85,14 @@ db-setup:
 	@docker exec $(TEST_DB_CONTAINER) psql -U testuser -d postgres -c \
 		"CREATE DATABASE $(TEST_DB_NAME);" 2>/dev/null || \
 		echo "   (Database 'challenge_db' already exists, skipping)"
-	@echo "📋 Applying database schema to 'postgres' database (for tests)..."
-	@cat $(MIGRATION_FILE) | \
-		docker exec -i $(TEST_DB_CONTAINER) psql -U postgres -d postgres 2>&1 | grep -v "already exists" || true
-	@echo "📋 Applying database schema to 'challenge_db' database (for benchmarks)..."
-	@cat $(MIGRATION_FILE) | \
-		docker exec -i $(TEST_DB_CONTAINER) psql -U postgres -d $(TEST_DB_NAME) 2>&1 | grep -v "already exists" || true
+	@echo "📋 Applying migrations to 'postgres' database (for tests)..."
+	@for f in $$(ls $(MIGRATION_DIR)/*.up.sql | sort); do \
+		cat $$f | docker exec -i $(TEST_DB_CONTAINER) psql -U postgres -d postgres 2>&1 | grep -v "already exists" || true; \
+	done
+	@echo "📋 Applying migrations to 'challenge_db' database (for benchmarks)..."
+	@for f in $$(ls $(MIGRATION_DIR)/*.up.sql | sort); do \
+		cat $$f | docker exec -i $(TEST_DB_CONTAINER) psql -U postgres -d $(TEST_DB_NAME) 2>&1 | grep -v "already exists" || true; \
+	done
 	@echo "✅ Database setup complete!"
 	@echo ""
 	@echo "Database connection details:"

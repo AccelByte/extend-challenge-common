@@ -199,8 +199,9 @@ docker exec extend-challenge-test-db psql -U testuser -d postgres -c \
 # Create challenge_db and apply schema
 docker exec extend-challenge-test-db psql -U testuser -d postgres -c \
   "CREATE DATABASE challenge_db;" 2>/dev/null || true
-cat migrations/001_create_user_goal_progress.up.sql | \
-  docker exec -i extend-challenge-test-db psql -U testuser -d challenge_db
+for f in ../extend-challenge-service/migrations/*.up.sql; do
+  cat "$f" | docker exec -i extend-challenge-test-db psql -U testuser -d challenge_db
+done
 
 # Run M4 benchmarks
 cd extend-challenge-common
